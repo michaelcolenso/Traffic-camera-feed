@@ -1,0 +1,5 @@
+{
+  "name": "Seattle Traffic Watch",
+  "description": "Real-time traffic camera dashboard for Seattle using SDOT data.",
+  "requestFramePermissions": []
+}
