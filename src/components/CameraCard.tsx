@@ -121,19 +121,21 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval 
                 onClick={() => setIsVideoPlaying(true)}
                 className="rounded-full bg-white/10 p-1.5 text-white hover:bg-white/20 backdrop-blur-md"
                 title="Switch to Video"
+                aria-label={`Switch ${camera.cameralabel} to live video`}
               >
-                <VideoIcon className="h-3 w-3" />
+                <VideoIcon className="h-3 w-3" aria-hidden="true" />
               </button>
             )}
             {camera.web_url && (
-               <a 
-                 href={camera.web_url.url} 
-                 target="_blank" 
+               <a
+                 href={camera.web_url.url}
+                 target="_blank"
                  rel="noopener noreferrer"
                  className="rounded-full bg-white/10 p-1.5 text-white hover:bg-white/20 backdrop-blur-md"
                  title="Open in SDOT"
+                 aria-label={`Open ${camera.cameralabel} on SDOT website`}
                >
-                 <ExternalLink className="h-3 w-3" />
+                 <ExternalLink className="h-3 w-3" aria-hidden="true" />
                </a>
             )}
           </div>
