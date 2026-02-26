@@ -47,7 +47,7 @@ export function VideoPlayer({
       }
     };
 
-    const handleError = (e: Event | string) => {
+    const handleError = (e: Event | Hls.Events.ERROR) => {
       console.error('Video error:', e);
       setHasError(true);
       setIsLoading(false);
@@ -102,6 +102,7 @@ export function VideoPlayer({
         video.removeEventListener('loadedmetadata', handleCanPlay);
         video.removeEventListener('error', handleError);
         video.removeAttribute('src');
+        video.load();
       }
     };
   }, [url, autoPlay, onError, onLoad]);
