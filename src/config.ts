@@ -1,6 +1,6 @@
 // App configuration
 // Cloudflare Worker proxy URL for video streams
-export const VIDEO_PROXY_URL = 'https://video-proxy.aged-morning-c8e4.workers.dev';
+export const VIDEO_PROXY_URL = 'https://seattle-video-proxy.aged-morning-c8e4.workers.dev';
 
 // Base URLs
 export const VIDEO_SERVER = 'video.seattle.gov';

@@ -1,6 +1,0 @@
-name = "video-cors-proxy"
-main = "index.js"
-compatibility_date = "2024-01-01"
-
-# This is a Worker, NOT Pages
-# Deploy with: npx wrangler deploy
