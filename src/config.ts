@@ -2,7 +2,7 @@
 // Set your Cloudflare Worker proxy URL here after deployment
 
 // Example: 'https://seattle-traffic-video-proxy.YOUR_SUBDOMAIN.workers.dev'
-export const VIDEO_PROXY_URL = '';
+export const VIDEO_PROXY_URL = 'https://video-proxy.aged-morning-c8e4.workers.dev/';
 
 // Base URLs
 export const VIDEO_SERVER = 'video.seattle.gov';
