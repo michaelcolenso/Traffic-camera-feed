@@ -1,4 +1,5 @@
 import { TrafficCamera } from '../types';
+import { getVideoUrl } from '../config';
 
 // Seattle City GIS traffic cameras Feature Service (CDL = Camera Data Layer)
 // https://data-seattlecitygis.opendata.arcgis.com/datasets/SeattleCityGIS::traffic-cameras
@@ -26,13 +27,14 @@ interface ArcGISResponse {
 /**
  * Construct HLS video stream URL from stream name.
  * Seattle uses: https://video.seattle.gov/live/{STREAM_NAME}.stream/playlist.m3u8
+ * Routes through CORS proxy if configured.
  */
 function buildVideoUrl(streamName: string | null | undefined): string | undefined {
   if (!streamName) return undefined;
   // Clean up the stream name
   const cleanName = String(streamName).trim();
   if (!cleanName) return undefined;
-  return `https://video.seattle.gov/live/${cleanName}.stream/playlist.m3u8`;
+  return getVideoUrl(`/live/${cleanName}.stream/playlist.m3u8`);
 }
 
 /**
