@@ -1,4 +1,4 @@
-name = "seattle-traffic-video-proxy"
+name = "seattle-traffic-video"
 main = "index.js"
 compatibility_date = "2024-01-01"
 
