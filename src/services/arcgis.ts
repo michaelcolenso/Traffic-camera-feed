@@ -67,11 +67,13 @@ function mapFeature(feature: ArcGISFeature): TrafficCamera | null {
   const location = String(attrs['LOCATION'] || '');
   const label = location || name || `Camera ${feature.id ?? ''}`;
 
-  // Image URL
-  const imageUrl = String(attrs['URL'] || '');
+  // Image URL - force HTTPS to avoid mixed content and CORS issues
+  let imageUrl = String(attrs['URL'] || '');
   if (!imageUrl || !imageUrl.startsWith('http')) {
     return null;
   }
+  // Upgrade HTTP to HTTPS
+  imageUrl = imageUrl.replace(/^http:\/\//, 'https://');
 
   // Video stream URL
   const streamName = attrs['STREAM_NAME'];
