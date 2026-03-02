@@ -162,10 +162,8 @@ export const CameraCard: React.FC<CameraCardProps> = ({
                 className="rounded-full bg-red-500/20 p-1.5 text-red-400 hover:bg-red-500/40 backdrop-blur-md transition-colors"
                 title="Stop stream"
                 aria-label={`Stop stream for ${camera.cameralabel}`}
-                className="rounded-full bg-white/10 p-1.5 text-white hover:bg-white/20 backdrop-blur-md"
-                title="Switch to Video"
               >
-                <VideoIcon className="h-3 w-3" />
+                <VideoIcon className="h-3 w-3" aria-hidden="true" />
               </button>
             )}
             {camera.web_url?.url && (
@@ -179,16 +177,6 @@ export const CameraCard: React.FC<CameraCardProps> = ({
               >
                 <ExternalLink className="h-3 w-3" aria-hidden="true" />
               </a>
-            {camera.web_url && (
-               <a 
-                 href={camera.web_url.url} 
-                 target="_blank" 
-                 rel="noopener noreferrer"
-                 className="rounded-full bg-white/10 p-1.5 text-white hover:bg-white/20 backdrop-blur-md"
-                 title="Open in SDOT"
-               >
-                 <ExternalLink className="h-3 w-3" />
-               </a>
             )}
           </div>
         </div>
