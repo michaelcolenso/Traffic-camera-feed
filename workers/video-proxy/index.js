@@ -10,7 +10,6 @@ const ALLOWED_ORIGINS = [
   'http://localhost:4173',
 ];
 
-// Wowza Streaming Engine server
 const VIDEO_SERVER = '61e0c5d388c2e.streamlock.net';
 
 function getCorsHeaders(origin) {
@@ -37,12 +36,22 @@ export default {
       return new Response('Method not allowed', { status: 405, headers: corsHeaders });
     }
 
-    const targetPath = url.searchParams.get('url');
+    // Support both query param and direct path
+    // ?url=/live/xxx.stream/playlist.m3u8 OR /live/xxx.stream/playlist.m3u8
+    let targetPath = url.searchParams.get('url');
+    
+    if (!targetPath) {
+      // Try to extract from pathname (e.g., /live/xxx.stream/playlist.m3u8)
+      const pathMatch = url.pathname.match(/^\/live\/.+/);
+      if (pathMatch) {
+        targetPath = url.pathname;
+      }
+    }
+
     if (!targetPath) {
       return new Response('Missing url parameter', { status: 400, headers: corsHeaders });
     }
 
-    // Build target URL
     const targetUrl = `https://${VIDEO_SERVER}${targetPath}`;
 
     try {
@@ -54,13 +63,35 @@ export default {
         },
       });
 
+      const contentType = response.headers.get('Content-Type') || '';
+      
+      // If it's an m3u8 playlist, rewrite relative URLs to absolute proxy URLs
+      if (contentType.includes('mpegurl') || targetPath.endsWith('.m3u8')) {
+        const text = await response.text();
+        const baseUrl = `${url.protocol}//${url.host}`;
+        
+        // Rewrite relative chunklist URLs to proxy URLs
+        // chunklist_xxx.m3u8 -> /live/stream/chunklist_xxx.m3u8
+        const basePath = targetPath.substring(0, targetPath.lastIndexOf('/') + 1);
+        const rewritten = text.replace(
+          /^(chunklist_[^\s]+\.m3u8|media_[^\s]+\.ts)$/gm,
+          (match) => `${baseUrl}${basePath}${match}`
+        );
+
+        return new Response(rewritten, {
+          status: response.status,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/vnd.apple.mpegurl',
+          },
+        });
+      }
+
+      // For other files (ts segments, etc.)
       const newHeaders = new Headers(response.headers);
       Object.entries(corsHeaders).forEach(([k, v]) => newHeaders.set(k, v));
 
-      // Set correct content type for m3u8
-      if (targetPath.endsWith('.m3u8')) {
-        newHeaders.set('Content-Type', 'application/vnd.apple.mpegurl');
-      } else if (targetPath.endsWith('.ts')) {
+      if (targetPath.endsWith('.ts')) {
         newHeaders.set('Content-Type', 'video/mp2t');
       }
 
