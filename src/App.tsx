@@ -39,8 +39,7 @@ export default function App() {
       camera.imageurl?.url,
   );
 
-  // Video streams disabled - ArcGIS stream names don't match video.seattle.gov endpoints
-const withVideo = 0;
+  const withVideo = cameras?.filter((c) => c.video_url?.url).length ?? 0;
 
   function applyArcGISUrl() {
     setArcgisUrl(pendingUrl.trim());
@@ -77,6 +76,11 @@ const withVideo = 0;
                 <span className="rounded-full bg-zinc-800 px-2.5 py-1 text-xs font-mono text-zinc-400">
                   {cameras.length} cameras
                 </span>
+                {withVideo > 0 && (
+                  <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-mono text-emerald-400">
+                    {withVideo} with video
+                  </span>
+                )}
               </div>
             )}
 
