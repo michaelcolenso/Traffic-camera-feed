@@ -19,7 +19,7 @@ function makeFetcher(source: DataSource, arcgisUrl: string) {
 
 export default function App() {
   const [view, setView] = useState<ViewMode>('grid');
-  const [source, setSource] = useState<DataSource>('sdot');
+  const [source, setSource] = useState<DataSource>('arcgis');
   const [arcgisUrl, setArcgisUrl] = useState(ARCGIS_FEATURE_SERVICE_URL);
   const [pendingUrl, setPendingUrl] = useState(ARCGIS_FEATURE_SERVICE_URL);
   const [showSettings, setShowSettings] = useState(false);

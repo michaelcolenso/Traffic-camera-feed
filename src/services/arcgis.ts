@@ -1,134 +1,101 @@
 import { TrafficCamera } from '../types';
 
-// Seattle City GIS traffic cameras Feature Service
+// Seattle City GIS traffic cameras Feature Service (CDL = Camera Data Layer)
 // https://data-seattlecitygis.opendata.arcgis.com/datasets/SeattleCityGIS::traffic-cameras
 export const ARCGIS_FEATURE_SERVICE_URL =
-  'https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services/SDOT_TrafficCameras/FeatureServer/0';
+  'https://services.arcgis.com/ZOyb2t4B0UYuYNYH/ArcGIS/rest/services/Traffic_Cameras_CDL/FeatureServer/0';
 
 interface ArcGISFeature {
   type: 'Feature';
   id?: number | string;
   geometry: {
-    type: 'Point';
-    coordinates: [number, number]; // [lng, lat]
+    x: number; // longitude
+    y: number; // latitude
   } | null;
-  properties: Record<string, unknown>;
+  attributes: Record<string, unknown>;
 }
 
-interface ArcGISGeoJSON {
-  type: 'FeatureCollection';
+interface ArcGISResponse {
   features: ArcGISFeature[];
+  error?: {
+    code: number;
+    message: string;
+  };
 }
 
-/** Case-insensitive lookup for a string URL property among common field name variants. */
-function findUrl(
-  props: Record<string, unknown>,
-  candidates: string[],
-): string {
-  for (const candidate of candidates) {
-    const key = Object.keys(props).find(
-      (k) => k.toLowerCase() === candidate.toLowerCase(),
-    );
-    if (key && typeof props[key] === 'string') {
-      const val = props[key] as string;
-      if (val.startsWith('http')) return val;
-    }
-  }
-  return '';
+/**
+ * Construct HLS video stream URL from stream name.
+ * Seattle uses: https://video.seattle.gov/live/{STREAM_NAME}.stream/playlist.m3u8
+ */
+function buildVideoUrl(streamName: string | null | undefined): string | undefined {
+  if (!streamName) return undefined;
+  // Clean up the stream name
+  const cleanName = String(streamName).trim();
+  if (!cleanName) return undefined;
+  return `https://video.seattle.gov/live/${cleanName}.stream/playlist.m3u8`;
 }
 
-/** Case-insensitive lookup for any string property. */
-function findString(
-  props: Record<string, unknown>,
-  candidates: string[],
-): string {
-  for (const candidate of candidates) {
-    const key = Object.keys(props).find(
-      (k) => k.toLowerCase() === candidate.toLowerCase(),
-    );
-    if (key && typeof props[key] === 'string' && props[key]) {
-      return props[key] as string;
-    }
-  }
-  return '';
+/**
+ * Build SDOT web page URL for the camera.
+ * SDOT traveler map uses: https://web6.seattle.gov/travelers/
+ */
+function buildWebUrl(cameraName: string | null | undefined): string | undefined {
+  // For now, link to the main travelers map
+  // Individual camera URLs would need specific camera IDs
+  return 'https://web6.seattle.gov/travelers/';
 }
 
 function mapFeature(feature: ArcGISFeature): TrafficCamera | null {
-  const { properties: props, geometry } = feature;
+  const { attributes: attrs, geometry } = feature;
 
-  // Coordinates — prefer geometry, fall back to explicit lat/lng fields
-  const lng =
-    geometry?.coordinates[0]?.toString() ??
-    findString(props, ['longitude', 'lon', 'long', 'x']);
-  const lat =
-    geometry?.coordinates[1]?.toString() ??
-    findString(props, ['latitude', 'lat', 'y']);
+  // Skip inactive cameras
+  const status = String(attrs['SERVSTAT'] || '').toUpperCase();
+  if (status === 'INACT' || status === 'INACTIVE') {
+    return null;
+  }
 
-  if (!lat || !lng) return null;
+  // Get coordinates from geometry (WGS84)
+  const lng = geometry?.x;
+  const lat = geometry?.y;
 
-  const label =
-    findString(props, [
-      'cameralabel',
-      'camera_label',
-      'label',
-      'name',
-      'description',
-      'camera_name',
-      'title',
-    ]) || `Camera ${feature.id ?? ''}`;
+  if (typeof lng !== 'number' || typeof lat !== 'number') {
+    return null;
+  }
 
-  // ArcGIS Hub stores the SDOT nested JSON fields as plain strings or nested objects
-  // Try both flat and nested patterns
-  const rawImageUrl =
-    findUrl(props, ['imageurl', 'image_url', 'imagelink', 'photo_url', 'snapshot_url']) ||
-    (() => {
-      const nested = props['imageurl'];
-      if (nested && typeof nested === 'object') {
-        return (nested as { url?: string }).url ?? '';
-      }
-      return '';
-    })();
+  // Camera name/label
+  const name = String(attrs['NAME'] || '').replace('.jpg', '');
+  const location = String(attrs['LOCATION'] || '');
+  const label = location || name || `Camera ${feature.id ?? ''}`;
 
-  if (!rawImageUrl) return null;
+  // Image URL
+  const imageUrl = String(attrs['URL'] || '');
+  if (!imageUrl || !imageUrl.startsWith('http')) {
+    return null;
+  }
 
-  const rawVideoUrl =
-    findUrl(props, ['video_url', 'videourl', 'stream_url', 'hls_url', 'hlsurl']) ||
-    (() => {
-      const nested = props['video_url'];
-      if (nested && typeof nested === 'object') {
-        return (nested as { url?: string }).url ?? '';
-      }
-      return '';
-    })();
+  // Video stream URL
+  const streamName = attrs['STREAM_NAME'];
+  const videoUrl = buildVideoUrl(streamName);
 
-  const rawWebUrl =
-    findUrl(props, ['web_url', 'weburl', 'link', 'url']) ||
-    (() => {
-      const nested = props['web_url'];
-      if (nested && typeof nested === 'object') {
-        return (nested as { url?: string }).url ?? '';
-      }
-      return '';
-    })();
-
-  const xCoord = findString(props, ['x_coord', 'xcoord', 'x']) || lng;
-  const yCoord = findString(props, ['y_coord', 'ycoord', 'y']) || lat;
+  // Web URL
+  const webUrl = buildWebUrl(name);
 
   return {
     cameralabel: label,
-    imageurl: { url: rawImageUrl },
-    video_url: rawVideoUrl ? { url: rawVideoUrl } : undefined,
-    web_url: rawWebUrl ? { url: rawWebUrl } : undefined,
-    x_coord: xCoord,
-    y_coord: yCoord,
-    location: { latitude: lat, longitude: lng },
+    imageurl: { url: imageUrl },
+    video_url: videoUrl ? { url: videoUrl } : undefined,
+    web_url: webUrl ? { url: webUrl } : undefined,
+    x_coord: String(lng),
+    y_coord: String(lat),
+    location: { latitude: String(lat), longitude: String(lng) },
   };
 }
 
 export async function fetchArcGISCameras(
   featureServiceUrl: string,
 ): Promise<TrafficCamera[]> {
-  const queryUrl = `${featureServiceUrl}/query?where=1%3D1&outFields=*&f=geojson`;
+  // Query with outSR=4326 to get WGS84 (lat/lng) coordinates
+  const queryUrl = `${featureServiceUrl}/query?where=1%3D1&outFields=*&outSR=4326&f=json`;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15_000);
@@ -140,7 +107,12 @@ export async function fetchArcGISCameras(
         `ArcGIS API error: ${response.status} ${response.statusText}`,
       );
     }
-    const data: ArcGISGeoJSON = await response.json();
+    const data: ArcGISResponse = await response.json();
+    
+    if (data.error) {
+      throw new Error(`ArcGIS API error: ${data.error.message}`);
+    }
+    
     return data.features
       .map(mapFeature)
       .filter((c): c is TrafficCamera => c !== null);
