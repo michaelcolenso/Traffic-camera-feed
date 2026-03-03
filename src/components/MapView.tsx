@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
+import { ExternalLink, RefreshCw, Video as VideoIcon, X } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { TrafficCamera } from '../types';
-import { X, Video as VideoIcon, ExternalLink } from 'lucide-react';
 
-// CartoDB Dark Matter tiles — free, no API key required
 const DARK_STYLE: maplibregl.StyleSpecification = {
   version: 8,
   sources: {
@@ -31,7 +30,6 @@ const DARK_STYLE: maplibregl.StyleSpecification = {
   ],
 };
 
-// Seattle city center default
 const SEATTLE_CENTER: [number, number] = [-122.3321, 47.6062];
 
 interface MapViewProps {
@@ -76,21 +74,16 @@ export function MapView({ cameras }: MapViewProps) {
         const lat = parseFloat(camera.location.latitude);
         const lng = parseFloat(camera.location.longitude);
 
-        // Marker element
         const el = document.createElement('div');
-        el.className =
-          'w-3 h-3 rounded-full bg-emerald-500 border-2 border-emerald-200 shadow-md cursor-pointer ' +
-          'hover:scale-150 transition-transform duration-150 hover:bg-emerald-400';
+        el.className = 'camera-marker';
 
-        const marker = new maplibregl.Marker({ element: el })
-          .setLngLat([lng, lat])
-          .addTo(map);
+        const marker = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
 
         el.addEventListener('click', (e) => {
           e.stopPropagation();
           setSelected(camera);
           setImgTimestamp(Date.now());
-          map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 13), duration: 400 });
+          map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 13), duration: 420 });
         });
 
         markersRef.current.push(marker);
@@ -103,39 +96,32 @@ export function MapView({ cameras }: MapViewProps) {
       map.remove();
       mapRef.current = null;
     };
-    // cameras reference is stable from SWR — no need to re-run on every re-render
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameras]);
 
   return (
-    <div className="relative w-full" style={{ height: 'calc(100vh - 73px)' }}>
-      {/* Map canvas */}
+    <div className="relative w-full" style={{ height: 'calc(100vh - 84px)' }}>
       <div ref={containerRef} className="absolute inset-0" />
 
-      {/* Camera count badge */}
-      <div className="absolute top-4 left-4 rounded-full bg-zinc-900/80 border border-white/10 backdrop-blur-sm px-3 py-1 text-xs font-mono text-zinc-400">
-        {cameras.length} cameras
+      <div className="absolute left-4 top-4 rounded-full border border-cyan-300/45 bg-slate-950/80 px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-cyan-100 backdrop-blur-md">
+        {cameras.length} active nodes
       </div>
 
-      {/* Selected camera panel */}
       {selected && (
-        <div className="absolute bottom-6 right-4 w-80 rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-md shadow-2xl overflow-hidden z-10">
-          {/* Header */}
-          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 gap-2">
-            <span className="font-mono text-xs font-medium text-zinc-300 truncate">
+        <aside className="glass-panel-strong absolute bottom-5 right-4 z-10 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-2xl">
+          <header className="flex items-center justify-between border-b border-slate-300/15 px-4 py-3">
+            <span className="font-display truncate text-[11px] uppercase tracking-[0.12em] text-slate-100">
               {selected.cameralabel}
             </span>
             <button
               onClick={handleClose}
-              className="shrink-0 rounded-full p-1 text-zinc-500 hover:text-zinc-200 hover:bg-white/10 transition-colors"
+              className="rounded-full border border-slate-300/20 p-1 text-slate-400 transition hover:border-slate-200/35 hover:text-slate-100"
               aria-label="Close"
             >
               <X className="h-3.5 w-3.5" />
             </button>
-          </div>
+          </header>
 
-          {/* Snapshot */}
-          <div className="aspect-video w-full bg-black">
+          <div className="aspect-video w-full bg-slate-950">
             <img
               src={`${selected.imageurl.url}?t=${imgTimestamp}`}
               alt={selected.cameralabel}
@@ -146,14 +132,13 @@ export function MapView({ cameras }: MapViewProps) {
             />
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center gap-3 px-4 py-3 border-t border-white/5">
+          <footer className="flex flex-wrap items-center gap-3 border-t border-slate-300/10 px-4 py-3">
             {selected.video_url?.url && (
               <a
                 href={selected.video_url.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
+                className="flex items-center gap-1.5 rounded-lg border border-cyan-300/40 bg-cyan-500/10 px-2 py-1.5 text-xs text-cyan-200 transition hover:bg-cyan-500/20"
               >
                 <VideoIcon className="h-3.5 w-3.5" />
                 Live stream
@@ -164,7 +149,7 @@ export function MapView({ cameras }: MapViewProps) {
                 href={selected.web_url.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                className="flex items-center gap-1.5 rounded-lg border border-slate-300/20 bg-slate-900/70 px-2 py-1.5 text-xs text-slate-300 transition hover:border-slate-200/35"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
                 SDOT page
@@ -172,12 +157,13 @@ export function MapView({ cameras }: MapViewProps) {
             )}
             <button
               onClick={() => setImgTimestamp(Date.now())}
-              className="ml-auto text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+              className="ml-auto flex items-center gap-1.5 rounded-lg border border-slate-300/20 bg-slate-900/70 px-2 py-1.5 text-xs text-slate-300 transition hover:border-slate-200/35"
             >
+              <RefreshCw className="h-3.5 w-3.5" />
               Refresh
             </button>
-          </div>
-        </div>
+          </footer>
+        </aside>
       )}
     </div>
   );

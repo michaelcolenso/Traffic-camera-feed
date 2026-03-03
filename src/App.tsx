@@ -1,17 +1,16 @@
-import { useState, useDeferredValue } from 'react';
+import { useDeferredValue, useState } from 'react';
 import useSWR from 'swr';
-import { fetchCameras } from './services/api';
-import { fetchArcGISCameras, ARCGIS_FEATURE_SERVICE_URL } from './services/arcgis';
-import { CameraCard } from './components/CameraCard';
-import { MapView } from './components/MapView';
-import { ErrorBoundary } from './components/ErrorBoundary';
 import { Search, Video, AlertTriangle, Map, LayoutGrid, Settings, X, Database } from 'lucide-react';
+import { CameraCard } from './components/CameraCard';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { MapView } from './components/MapView';
+import { fetchArcGISCameras, ARCGIS_FEATURE_SERVICE_URL } from './services/arcgis';
+import { fetchCameras } from './services/api';
 import { TrafficCamera } from './types';
 
 type ViewMode = 'grid' | 'map';
 type DataSource = 'sdot' | 'arcgis';
 
-// Fetcher factories for SWR — key includes the source so caches are independent
 function makeFetcher(source: DataSource, arcgisUrl: string) {
   return (_key: string): Promise<TrafficCamera[]> =>
     source === 'arcgis' ? fetchArcGISCameras(arcgisUrl) : fetchCameras();
@@ -35,8 +34,7 @@ export default function App() {
 
   const filteredCameras = cameras?.filter(
     (camera) =>
-      camera.cameralabel.toLowerCase().includes(deferredQuery.toLowerCase()) &&
-      camera.imageurl?.url,
+      camera.cameralabel.toLowerCase().includes(deferredQuery.toLowerCase()) && camera.imageurl?.url,
   );
 
   const withVideo = cameras?.filter((c) => c.video_url?.url).length ?? 0;
@@ -49,192 +47,185 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-emerald-500/30">
-
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <header className="sticky top-0 z-20 border-b border-white/10 bg-zinc-950/80 backdrop-blur-md">
-          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3">
-
-            {/* Logo */}
-            <div className="flex items-center gap-3 mr-auto">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
-                <Video className="h-5 w-5" />
+      <div className="app-shell min-h-screen text-slate-100 selection:bg-cyan-400/25">
+        <header className="sticky top-0 z-30 border-b border-slate-300/10 bg-slate-950/70 backdrop-blur-xl">
+          <div className="mx-auto max-w-7xl px-4 py-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="mr-auto flex min-w-64 items-center gap-3 rounded-2xl border border-slate-400/20 bg-slate-900/55 px-3 py-2 shadow-[inset_0_1px_0_rgba(148,163,184,0.15)]">
+                <div className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-300/40 bg-cyan-300/10 text-cyan-300 shadow-[0_0_18px_rgba(41,216,255,0.35)]">
+                  <Video className="h-5 w-5" />
+                  <span className="pointer-events-none absolute -inset-0.5 rounded-xl border border-cyan-200/20" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="font-display truncate text-[0.95rem] font-semibold tracking-[0.08em] text-slate-100">
+                    Seattle Traffic Watch
+                  </h1>
+                  <p className="truncate text-[10px] uppercase tracking-[0.16em] text-slate-400">
+                    {source === 'arcgis' ? 'ArcGIS feed | SDOT cameras' : 'Socrata feed | SDOT data'}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-base font-bold tracking-tight text-white leading-none">
-                  Seattle Traffic Watch
-                </h1>
-                <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
-                  {source === 'arcgis' ? 'ARCGIS • SDOT CAMERAS' : 'SOCRATA • SDOT DATA'}
-                </p>
-              </div>
-            </div>
 
-            {/* Stats pills */}
-            {cameras && (
-              <div className="hidden sm:flex items-center gap-2">
-                <span className="rounded-full bg-zinc-800 px-2.5 py-1 text-xs font-mono text-zinc-400">
-                  {cameras.length} cameras
-                </span>
-                {withVideo > 0 && (
-                  <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-mono text-emerald-400">
-                    {withVideo} with video
-                  </span>
-                )}
-              </div>
-            )}
+              {cameras && (
+                <div className="hidden items-center gap-2 xl:flex">
+                  <span className="hud-pill">{cameras.length} cameras online</span>
+                  {withVideo > 0 && <span className="hud-pill hud-pill--accent">{withVideo} live streams</span>}
+                </div>
+              )}
 
-            {/* Search */}
-            <div className="relative w-full sm:w-56 order-last sm:order-none">
-              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                <Search className="h-3.5 w-3.5 text-zinc-500" aria-hidden="true" />
+              <div className="relative order-last w-full sm:order-none sm:w-72">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  aria-label="Search cameras"
+                  placeholder="Locate camera node..."
+                  className="w-full rounded-xl border border-slate-400/20 bg-slate-900/70 py-2 pl-9 pr-3 text-sm text-slate-200 placeholder:text-slate-500 focus:border-cyan-300/55 focus:outline-none focus:ring-2 focus:ring-cyan-400/25"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
               </div>
-              <input
-                type="text"
-                aria-label="Search cameras"
-                placeholder="Search cameras…"
-                className="w-full rounded-lg border border-white/10 bg-zinc-900 py-1.5 pl-9 pr-3 text-sm text-zinc-200 placeholder-zinc-500 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
 
-            {/* View toggle */}
-            <div className="flex rounded-lg border border-white/10 bg-zinc-900 p-0.5">
+              <div className="flex items-center rounded-xl border border-slate-400/20 bg-slate-900/70 p-1">
+                <button
+                  onClick={() => setView('grid')}
+                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition ${view === 'grid' ? 'border border-cyan-300/45 bg-cyan-400/10 text-cyan-200 shadow-[0_0_12px_rgba(41,216,255,0.25)]' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                  Grid
+                </button>
+                <button
+                  onClick={() => setView('map')}
+                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition ${view === 'map' ? 'border border-cyan-300/45 bg-cyan-400/10 text-cyan-200 shadow-[0_0_12px_rgba(41,216,255,0.25)]' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  <Map className="h-3.5 w-3.5" />
+                  Map
+                </button>
+              </div>
+
               <button
-                onClick={() => setView('grid')}
-                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${view === 'grid' ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                onClick={() => setShowSettings((s) => !s)}
+                className={`rounded-xl border p-2 transition ${showSettings ? 'border-cyan-300/55 bg-cyan-400/10 text-cyan-200 shadow-[0_0_12px_rgba(41,216,255,0.25)]' : 'border-slate-400/20 bg-slate-900/70 text-slate-400 hover:text-slate-200'}`}
+                title="Data source settings"
+                aria-label="Toggle data source settings"
               >
-                <LayoutGrid className="h-3.5 w-3.5" />
-                Grid
-              </button>
-              <button
-                onClick={() => setView('map')}
-                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${view === 'map' ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-              >
-                <Map className="h-3.5 w-3.5" />
-                Map
+                <Settings className="h-4 w-4" />
               </button>
             </div>
 
-            {/* Settings */}
-            <button
-              onClick={() => setShowSettings((s) => !s)}
-              className={`rounded-lg border border-white/10 p-2 transition-colors ${showSettings ? 'bg-zinc-700 text-white' : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'}`}
-              title="Data source settings"
-              aria-label="Toggle data source settings"
-            >
-              <Settings className="h-4 w-4" />
-            </button>
-          </div>
-
-          {/* ── Settings panel ───────────────────────────────────────────── */}
-          {showSettings && (
-            <div className="border-t border-white/5 bg-zinc-900/60 backdrop-blur-sm px-4 py-4">
-              <div className="mx-auto max-w-7xl">
-                <p className="mb-3 text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-                  Data Source
+            {showSettings && (
+              <div className="mt-3 rounded-2xl border border-cyan-300/20 bg-slate-900/75 p-4 shadow-[0_24px_48px_rgba(2,6,23,0.55)] backdrop-blur-md">
+                <p className="mb-3 font-display text-[11px] uppercase tracking-[0.2em] text-cyan-200">
+                  Data Source Console
                 </p>
                 <div className="flex flex-wrap gap-3">
-                  {/* SDOT Socrata */}
                   <button
-                    onClick={() => { setSource('sdot'); setShowSettings(false); }}
-                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors ${source === 'sdot' ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400' : 'border-white/10 text-zinc-400 hover:border-white/20'}`}
+                    onClick={() => {
+                      setSource('sdot');
+                      setShowSettings(false);
+                    }}
+                    className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs transition ${source === 'sdot' ? 'border-cyan-300/55 bg-cyan-500/10 text-cyan-200' : 'border-slate-400/20 bg-slate-900/80 text-slate-300 hover:border-slate-300/35'}`}
                   >
                     <Database className="h-3.5 w-3.5" />
                     SDOT Socrata API
                   </button>
 
-                  {/* ArcGIS */}
-                  <div className="flex flex-1 min-w-60 items-center gap-2">
-                    <div className="relative flex-1">
-                      <input
-                        type="url"
-                        value={pendingUrl}
-                        onChange={(e) => setPendingUrl(e.target.value)}
-                        placeholder="ArcGIS Feature Service URL…"
-                        className="w-full rounded-lg border border-white/10 bg-zinc-800 py-2 pl-3 pr-3 text-xs text-zinc-200 placeholder-zinc-600 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-                      />
-                    </div>
+                  <div className="flex min-w-72 flex-1 items-center gap-2">
+                    <input
+                      type="url"
+                      value={pendingUrl}
+                      onChange={(e) => setPendingUrl(e.target.value)}
+                      placeholder="ArcGIS Feature Service URL..."
+                      className="w-full rounded-xl border border-slate-400/20 bg-slate-950/75 py-2 px-3 text-xs text-slate-200 placeholder:text-slate-500 focus:border-cyan-300/55 focus:outline-none focus:ring-2 focus:ring-cyan-400/25"
+                    />
                     <button
                       onClick={applyArcGISUrl}
-                      className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500 transition-colors whitespace-nowrap"
+                      className="rounded-xl border border-cyan-300/55 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-400/20"
                     >
                       Use ArcGIS
                     </button>
                   </div>
                 </div>
-                <p className="mt-2 text-[10px] text-zinc-600 font-mono">
-                  ArcGIS: paste the FeatureServer/0 endpoint URL from the Seattle City GIS hub
+                <p className="mt-2 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+                  Paste the FeatureServer/0 endpoint from Seattle City GIS hub.
                 </p>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </header>
 
-        {/* ── Content ────────────────────────────────────────────────────── */}
         {isLoading ? (
           <div className={view === 'map' ? 'p-0' : 'mx-auto max-w-7xl px-4 py-8'}>
             {view === 'map' ? (
-              <div className="flex h-[calc(100vh-73px)] items-center justify-center bg-zinc-950">
-                <div className="text-zinc-600 text-sm font-mono animate-pulse">Loading cameras…</div>
+              <div className="flex h-[calc(100vh-84px)] items-center justify-center">
+                <div className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 px-4 py-3 text-xs uppercase tracking-[0.2em] text-cyan-200/80 shadow-[0_0_24px_rgba(41,216,255,0.18)]">
+                  Loading camera telemetry...
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {[...Array(8)].map((_, i) => (
-                  <div key={i} className="aspect-video animate-pulse rounded-xl bg-zinc-900/50 border border-white/5" />
+                  <div
+                    key={i}
+                    className="skeleton-panel aspect-video rounded-2xl border border-slate-400/10"
+                  />
                 ))}
               </div>
             )}
           </div>
         ) : error ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center px-4">
-            <div className="mb-4 rounded-full bg-red-500/10 p-4 text-red-500">
-              <AlertTriangle className="h-8 w-8" />
+          <div className="mx-auto flex max-w-xl flex-col items-center justify-center px-4 py-24 text-center">
+            <div className="glass-panel-strong rounded-3xl px-8 py-9">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-rose-300/40 bg-rose-500/15 text-rose-300">
+                <AlertTriangle className="h-7 w-7" />
+              </div>
+              <h2 className="font-display text-lg tracking-[0.08em] text-slate-100">
+                Camera network unreachable
+              </h2>
+              <p className="mt-2 text-sm text-slate-400">
+                {source === 'arcgis'
+                  ? 'ArcGIS source did not respond. Verify endpoint in Data Source Console.'
+                  : 'SDOT source did not respond. Check connectivity and retry.'}
+              </p>
+              <button
+                onClick={() => mutate()}
+                className="mt-5 rounded-xl border border-cyan-300/50 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200 transition hover:bg-cyan-500/20"
+              >
+                Retry sync
+              </button>
             </div>
-            <h2 className="text-lg font-semibold text-white">Failed to load cameras</h2>
-            <p className="mt-1 text-sm text-zinc-500 max-w-sm">
-              {source === 'arcgis'
-                ? 'Could not reach the ArcGIS Feature Service. Check the URL in settings.'
-                : 'Could not reach the SDOT API. Check your connection.'}
-            </p>
-            <button
-              onClick={() => mutate()}
-              className="mt-4 rounded-lg bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700 transition-colors"
-            >
-              Retry
-            </button>
           </div>
         ) : view === 'map' ? (
           <MapView cameras={cameras ?? []} />
         ) : (
           <main className="mx-auto max-w-7xl px-4 py-8">
-            <div className="mb-5 flex items-center justify-between">
-              <p className="text-sm text-zinc-500">
-                Showing{' '}
-                <span className="font-medium text-zinc-300">{filteredCameras?.length}</span>
-                {' '}of{' '}
-                <span className="font-medium text-zinc-300">{cameras?.length}</span>{' '}
-                cameras
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-400/15 bg-slate-900/55 px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                Visible nodes
+                <span className="ml-2 text-cyan-200">{filteredCameras?.length}</span>
+                <span className="mx-1 text-slate-500">/</span>
+                <span className="text-slate-300">{cameras?.length}</span>
               </p>
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="flex items-center gap-1 rounded-lg border border-slate-400/20 px-2 py-1 text-[11px] uppercase tracking-[0.12em] text-slate-400 transition hover:border-slate-300/35 hover:text-slate-200"
                 >
-                  <X className="h-3 w-3" /> Clear
+                  <X className="h-3 w-3" />
+                  Clear filter
                 </button>
               )}
             </div>
 
             {filteredCameras?.length === 0 ? (
-              <div className="py-20 text-center text-zinc-500">
-                <p>No cameras found matching &ldquo;{searchQuery}&rdquo;</p>
+              <div className="glass-panel mx-auto max-w-xl rounded-3xl px-6 py-16 text-center">
+                <p className="font-display text-sm uppercase tracking-[0.16em] text-slate-200">
+                  No camera nodes match "{searchQuery}"
+                </p>
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="mt-3 text-sm text-emerald-500 hover:underline"
+                  className="mt-4 rounded-xl border border-cyan-300/45 bg-cyan-500/10 px-3 py-2 text-xs uppercase tracking-[0.14em] text-cyan-200 transition hover:bg-cyan-500/20"
                 >
-                  Clear search
+                  Reset query
                 </button>
               </div>
             ) : (

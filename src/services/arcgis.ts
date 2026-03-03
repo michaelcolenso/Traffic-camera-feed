@@ -79,7 +79,12 @@ function mapFeature(feature: ArcGISFeature): TrafficCamera | null {
 
   // Video stream URL
   const streamName = attrs['STREAM_NAME'];
-  const videoUrl = buildVideoUrl(streamName);
+  const videoUrl =
+    typeof streamName === 'string'
+      ? buildVideoUrl(streamName)
+      : streamName == null
+        ? undefined
+        : buildVideoUrl(String(streamName));
 
   // Web URL
   const webUrl = buildWebUrl(name);
