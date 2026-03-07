@@ -168,6 +168,50 @@ body::before {
   }
 }
 
+/* ── Mobile: hide scrollbars on zone strips ──────────────────────────── */
+.scroll-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scroll-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Bottom sheet slide-up animation ─────────────────────────────────── */
+.bottom-sheet-enter {
+  animation: sheet-up 280ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* ── Camera modal fade+scale-in animation ────────────────────────────── */
+.modal-enter {
+  animation: modal-in 220ms ease-out both;
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ── Safe area padding for bottom nav (notched phones) ───────────────── */
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 0.75rem);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

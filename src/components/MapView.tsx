@@ -34,9 +34,10 @@ const SEATTLE_CENTER: [number, number] = [-122.3321, 47.6062];
 
 interface MapViewProps {
   cameras: TrafficCamera[];
+  isMobile?: boolean;
 }
 
-export function MapView({ cameras }: MapViewProps) {
+export function MapView({ cameras, isMobile = false }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
@@ -106,7 +107,7 @@ export function MapView({ cameras }: MapViewProps) {
         {cameras.length} active nodes
       </div>
 
-      {selected && (
+      {selected && !isMobile && (
         <aside className="glass-panel-strong absolute bottom-5 right-4 z-10 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-2xl">
           <header className="flex items-center justify-between border-b border-slate-300/15 px-4 py-3">
             <span className="font-display truncate text-[11px] uppercase tracking-[0.12em] text-slate-100">
@@ -115,6 +116,72 @@ export function MapView({ cameras }: MapViewProps) {
             <button
               onClick={handleClose}
               className="rounded-full border border-slate-300/20 p-1 text-slate-400 transition hover:border-slate-200/35 hover:text-slate-100"
+              aria-label="Close"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </header>
+
+          <div className="aspect-video w-full bg-slate-950">
+            <img
+              src={`${selected.imageurl.url}?t=${imgTimestamp}`}
+              alt={selected.cameralabel}
+              className="h-full w-full object-cover"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          </div>
+
+          <footer className="flex flex-wrap items-center gap-3 border-t border-slate-300/10 px-4 py-3">
+            {selected.video_url?.url && (
+              <a
+                href={selected.video_url.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 rounded-lg border border-cyan-300/40 bg-cyan-500/10 px-2 py-1.5 text-xs text-cyan-200 transition hover:bg-cyan-500/20"
+              >
+                <VideoIcon className="h-3.5 w-3.5" />
+                Live stream
+              </a>
+            )}
+            {selected.web_url?.url && (
+              <a
+                href={selected.web_url.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 rounded-lg border border-slate-300/20 bg-slate-900/70 px-2 py-1.5 text-xs text-slate-300 transition hover:border-slate-200/35"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                SDOT page
+              </a>
+            )}
+            <button
+              onClick={() => setImgTimestamp(Date.now())}
+              className="ml-auto flex items-center gap-1.5 rounded-lg border border-slate-300/20 bg-slate-900/70 px-2 py-1.5 text-xs text-slate-300 transition hover:border-slate-200/35"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Refresh
+            </button>
+          </footer>
+        </aside>
+      )}
+
+      {/* Mobile bottom sheet */}
+      {selected && isMobile && (
+        <aside className="bottom-sheet-enter glass-panel-strong fixed bottom-16 left-0 right-0 z-40 overflow-hidden rounded-t-3xl border-t border-slate-300/15 pb-safe">
+          {/* Drag handle */}
+          <div className="flex justify-center pt-2 pb-1">
+            <div className="h-1 w-10 rounded-full bg-slate-600" />
+          </div>
+
+          <header className="flex items-center justify-between border-b border-slate-300/10 px-4 py-2">
+            <span className="font-display truncate text-[11px] uppercase tracking-[0.12em] text-slate-100">
+              {selected.cameralabel}
+            </span>
+            <button
+              onClick={handleClose}
+              className="rounded-full border border-slate-300/20 p-1.5 text-slate-400 transition hover:border-slate-200/35 hover:text-slate-100"
               aria-label="Close"
             >
               <X className="h-3.5 w-3.5" />
