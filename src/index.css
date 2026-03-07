@@ -70,6 +70,20 @@ body::before {
   animation: fade-in 450ms ease-out both;
 }
 
+.mobile-hero-panel {
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  background:
+    radial-gradient(circle at 20% -10%, rgba(34, 211, 238, 0.23), transparent 50%),
+    linear-gradient(160deg, rgba(11, 27, 44, 0.9), rgba(7, 18, 33, 0.88));
+  box-shadow:
+    0 16px 34px rgba(1, 7, 18, 0.45),
+    inset 0 1px 0 rgba(125, 211, 252, 0.22);
+}
+
+.mobile-command-dock {
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+}
+
 .glass-panel {
   border: 1px solid var(--border-soft);
   background: linear-gradient(170deg, rgba(17, 30, 49, 0.78), rgba(10, 20, 33, 0.65));
