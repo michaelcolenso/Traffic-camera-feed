@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { ExternalLink, RefreshCw, Video as VideoIcon, X } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -14,7 +14,7 @@ const DARK_STYLE: maplibregl.StyleSpecification = {
         'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
         'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
       ],
-      tileSize: 256,
+      tileSize: 512,
       attribution:
         '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © <a href="https://carto.com/">CARTO</a>',
     },
@@ -36,6 +36,17 @@ interface MapViewProps {
   cameras: TrafficCamera[];
 }
 
+function getCoordinates(camera: TrafficCamera): { lat: number; lng: number } | null {
+  const lat = Number(camera.location?.latitude);
+  const lng = Number(camera.location?.longitude);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  return { lat, lng };
+}
+
 export function MapView({ cameras }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -43,10 +54,19 @@ export function MapView({ cameras }: MapViewProps) {
   const [selected, setSelected] = useState<TrafficCamera | null>(null);
   const [imgTimestamp, setImgTimestamp] = useState(Date.now());
 
+  const mappableCameras = useMemo(
+    () =>
+      cameras.filter((camera) => {
+        const hasImage = Boolean(camera.imageurl?.url);
+        return hasImage && getCoordinates(camera) !== null;
+      }),
+    [cameras],
+  );
+
   const handleClose = useCallback(() => setSelected(null), []);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || mapRef.current) return;
 
     const map = new maplibregl.Map({
       container: containerRef.current,
@@ -61,52 +81,58 @@ export function MapView({ cameras }: MapViewProps) {
 
     mapRef.current = map;
 
-    map.on('load', () => {
-      const validCameras = cameras.filter(
-        (c) =>
-          c.location?.latitude &&
-          c.location?.longitude &&
-          !isNaN(parseFloat(c.location.latitude)) &&
-          !isNaN(parseFloat(c.location.longitude)),
-      );
-
-      validCameras.forEach((camera) => {
-        const lat = parseFloat(camera.location.latitude);
-        const lng = parseFloat(camera.location.longitude);
-
-        const el = document.createElement('div');
-        el.className = 'camera-marker';
-
-        const marker = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
-
-        el.addEventListener('click', (e) => {
-          e.stopPropagation();
-          setSelected(camera);
-          setImgTimestamp(Date.now());
-          map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 13), duration: 420 });
-        });
-
-        markersRef.current.push(marker);
-      });
-    });
-
     return () => {
       markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
       map.remove();
       mapRef.current = null;
     };
-  }, [cameras]);
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    markersRef.current.forEach((marker) => marker.remove());
+    markersRef.current = [];
+
+    mappableCameras.forEach((camera) => {
+      const coords = getCoordinates(camera);
+      if (!coords) return;
+
+      const el = document.createElement('button');
+      el.className = 'camera-marker';
+      el.type = 'button';
+      el.setAttribute('aria-label', `View ${camera.cameralabel}`);
+
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat([coords.lng, coords.lat])
+        .addTo(map);
+
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setSelected(camera);
+        setImgTimestamp(Date.now());
+        map.flyTo({
+          center: [coords.lng, coords.lat],
+          zoom: Math.max(map.getZoom(), 13),
+          duration: 420,
+        });
+      });
+
+      markersRef.current.push(marker);
+    });
+  }, [mappableCameras]);
 
   return (
     <div className="relative w-full" style={{ height: 'calc(100vh - 84px)' }}>
       <div ref={containerRef} className="absolute inset-0" />
 
       <div className="absolute left-4 top-4 rounded-full border border-cyan-300/45 bg-slate-950/80 px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-cyan-100 backdrop-blur-md">
-        {cameras.length} active nodes
+        {mappableCameras.length} active nodes
       </div>
 
-      {selected && (
+      {selected && selected.imageurl?.url && (
         <aside className="glass-panel-strong absolute bottom-5 right-4 z-10 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-2xl">
           <header className="flex items-center justify-between border-b border-slate-300/15 px-4 py-3">
             <span className="font-display truncate text-[11px] uppercase tracking-[0.12em] text-slate-100">
