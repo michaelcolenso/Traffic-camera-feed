@@ -12,7 +12,7 @@ interface FocusCameraModalProps {
 
 export function FocusCameraModal({ camera, cameras, onClose, onSelect }: FocusCameraModalProps) {
   const [timestamp, setTimestamp] = useState(Date.now());
-  const [copied, setCopied] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   const coords = getCameraCoordinates(camera);
   const nearby = getNearbyCameras(camera, cameras);
 
@@ -33,10 +33,15 @@ export function FocusCameraModal({ camera, cameras, onClose, onSelect }: FocusCa
   async function copyBriefingLink() {
     const url = new URL(window.location.href);
     url.searchParams.set('camera', getCameraId(camera));
-    url.searchParams.set('view', 'grid');
-    await navigator.clipboard.writeText(url.toString());
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
+
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      setCopyStatus('copied');
+    } catch {
+      setCopyStatus('failed');
+    }
+
+    window.setTimeout(() => setCopyStatus('idle'), 1600);
   }
 
   return (
@@ -53,7 +58,7 @@ export function FocusCameraModal({ camera, cameras, onClose, onSelect }: FocusCa
             <RefreshCw className="h-4 w-4" />
           </button>
           <button onClick={copyBriefingLink} className="rounded-xl border border-cyan-300/35 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100 transition hover:bg-cyan-500/20">
-            <Copy className="mr-1.5 inline h-3.5 w-3.5" />{copied ? 'Copied' : 'Copy briefing'}
+            <Copy className="mr-1.5 inline h-3.5 w-3.5" />{copyStatus === 'copied' ? 'Copied' : copyStatus === 'failed' ? 'Copy failed' : 'Copy briefing'}
           </button>
           <button onClick={onClose} className="rounded-xl border border-slate-300/20 p-2 text-slate-400 transition hover:border-slate-200/35 hover:text-slate-100" aria-label="Close focus mode">
             <X className="h-4 w-4" />

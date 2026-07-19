@@ -29,19 +29,27 @@ function makeFetcher(source: DataSource, arcgisUrl: string) {
     source === 'arcgis' ? fetchArcGISCameras(arcgisUrl) : fetchCameras();
 }
 
+function getInitialCollections(): CollectionId[] {
+  const allowed = new Set(cameraCollections.map((collection) => collection.id));
+  return (new URLSearchParams(window.location.search).get('collections')?.split(',').filter((id): id is CollectionId =>
+    allowed.has(id as CollectionId),
+  ) ?? []);
+}
+
 export default function App() {
-  const [view, setView] = useState<ViewMode>('grid');
+  const [view, setView] = useState<ViewMode>(() =>
+    new URLSearchParams(window.location.search).get('view') === 'map' ? 'map' : 'grid',
+  );
   const [source, setSource] = useState<DataSource>('arcgis');
   const [arcgisUrl, setArcgisUrl] = useState(ARCGIS_FEATURE_SERVICE_URL);
   const [pendingUrl, setPendingUrl] = useState(ARCGIS_FEATURE_SERVICE_URL);
   const [showSettings, setShowSettings] = useState(false);
   const [searchQuery, setSearchQuery] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '');
-  const [activeCollections, setActiveCollections] = useState<CollectionId[]>(() =>
-    (new URLSearchParams(window.location.search).get('collections')?.split(',').filter(Boolean) ?? []) as CollectionId[],
-  );
+  const [activeCollections, setActiveCollections] = useState<CollectionId[]>(getInitialCollections);
   const [focusedCamera, setFocusedCamera] = useState<TrafficCamera | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [healthByCamera, setHealthByCamera] = useState<Record<string, CameraHealth>>({});
+  const [hasHydratedUrlCamera, setHasHydratedUrlCamera] = useState(false);
   const deferredQuery = useDeferredValue(searchQuery);
 
   const swrKey = `cameras-${source}-${arcgisUrl}`;
@@ -79,6 +87,7 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (!hasHydratedUrlCamera) return;
     const params = new URLSearchParams(window.location.search);
     searchQuery ? params.set('q', searchQuery) : params.delete('q');
     activeCollections.length ? params.set('collections', activeCollections.join(',')) : params.delete('collections');
@@ -86,7 +95,7 @@ export default function App() {
     view !== 'grid' ? params.set('view', view) : params.delete('view');
     const query = params.toString();
     window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
-  }, [activeCollections, focusedCamera, searchQuery, view]);
+  }, [activeCollections, focusedCamera, hasHydratedUrlCamera, searchQuery, view]);
 
   function applyArcGISUrl() {
     setArcgisUrl(pendingUrl.trim());
@@ -95,14 +104,13 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!cameras?.length || focusedCamera) return;
+    if (!cameras?.length || focusedCamera || hasHydratedUrlCamera) return;
     const params = new URLSearchParams(window.location.search);
     const cameraId = params.get('camera');
-    const initialView = params.get('view');
-    if (initialView === 'map') setView('map');
     const camera = cameras.find((item) => getCameraId(item) === cameraId);
     if (camera) setFocusedCamera(camera);
-  }, [cameras, focusedCamera]);
+    setHasHydratedUrlCamera(true);
+  }, [cameras, focusedCamera, hasHydratedUrlCamera]);
 
   return (
     <ErrorBoundary>
