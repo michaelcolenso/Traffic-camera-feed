@@ -3,6 +3,7 @@ import maplibregl from 'maplibre-gl';
 import { ExternalLink, RefreshCw, Video as VideoIcon, X } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { TrafficCamera } from '../types';
+import { CameraHealth, getCameraId } from '../lib/cameras';
 
 const DARK_STYLE: maplibregl.StyleSpecification = {
   version: 8,
@@ -34,6 +35,8 @@ const SEATTLE_CENTER: [number, number] = [-122.3321, 47.6062];
 
 interface MapViewProps {
   cameras: TrafficCamera[];
+  healthByCamera?: Record<string, CameraHealth>;
+  onFocus?: (camera: TrafficCamera) => void;
 }
 
 function getCoordinates(camera: TrafficCamera): { lat: number; lng: number } | null {
@@ -47,7 +50,7 @@ function getCoordinates(camera: TrafficCamera): { lat: number; lng: number } | n
   return { lat, lng };
 }
 
-export function MapView({ cameras }: MapViewProps) {
+export function MapView({ cameras, healthByCamera = {}, onFocus }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
@@ -101,7 +104,8 @@ export function MapView({ cameras }: MapViewProps) {
       if (!coords) return;
 
       const el = document.createElement('button');
-      el.className = 'camera-marker';
+      const health = healthByCamera[getCameraId(camera)];
+      el.className = `camera-marker${camera.video_url?.url ? ' camera-marker--live' : ''}${health?.lastImageError ? ' camera-marker--issue' : ''}`;
       el.type = 'button';
       el.setAttribute('aria-label', `View ${camera.cameralabel}`);
 
@@ -122,7 +126,7 @@ export function MapView({ cameras }: MapViewProps) {
 
       markersRef.current.push(marker);
     });
-  }, [mappableCameras]);
+  }, [mappableCameras, healthByCamera]);
 
   return (
     <div className="relative w-full" style={{ height: 'calc(100vh - 84px)' }}>
@@ -181,6 +185,12 @@ export function MapView({ cameras }: MapViewProps) {
                 SDOT page
               </a>
             )}
+            <button
+              onClick={() => onFocus?.(selected)}
+              className="flex items-center gap-1.5 rounded-lg border border-cyan-300/40 bg-cyan-500/10 px-2 py-1.5 text-xs text-cyan-200 transition hover:bg-cyan-500/20"
+            >
+              Focus
+            </button>
             <button
               onClick={() => setImgTimestamp(Date.now())}
               className="ml-auto flex items-center gap-1.5 rounded-lg border border-slate-300/20 bg-slate-900/70 px-2 py-1.5 text-xs text-slate-300 transition hover:border-slate-200/35"

@@ -6,9 +6,11 @@ import { TrafficCamera } from '../types';
 interface CameraCardProps {
   camera: TrafficCamera;
   refreshInterval?: number;
+  onFocus?: (camera: TrafficCamera) => void;
+  onHealthChange?: (camera: TrafficCamera, event: 'image-refresh' | 'image-error' | 'stream-error') => void;
 }
 
-export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval = 30_000 }) => {
+export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval = 30_000, onFocus, onHealthChange }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [isInView, setIsInView] = useState(false);
   const [timestamp, setTimestamp] = useState(Date.now());
@@ -94,6 +96,7 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval 
             poster={imageUrl}
             onError={() => {
               setIsVideoPlaying(false);
+              onHealthChange?.(camera, 'stream-error');
             }}
           />
         ) : hasImgError ? (
@@ -109,13 +112,16 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval 
               'h-full w-full object-cover transition-opacity duration-500',
               isImgLoading ? 'opacity-65' : 'opacity-100',
             )}
+            onClick={() => onFocus?.(camera)}
             onLoad={() => {
               setIsImgLoading(false);
               setHasImgError(false);
+              onHealthChange?.(camera, 'image-refresh');
             }}
             onError={() => {
               setIsImgLoading(false);
               setHasImgError(true);
+              onHealthChange?.(camera, 'image-error');
             }}
             loading="lazy"
           />

@@ -1,4 +1,4 @@
-import { useDeferredValue, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import {
   Search,
@@ -17,6 +17,8 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { MapView } from './components/MapView';
 import { fetchArcGISCameras, ARCGIS_FEATURE_SERVICE_URL } from './services/arcgis';
 import { fetchCameras } from './services/api';
+import { CameraHealth, CollectionId, cameraCollections, filterCameras, getCameraId } from './lib/cameras';
+import { FocusCameraModal } from './components/FocusCameraModal';
 import { TrafficCamera } from './types';
 
 type ViewMode = 'grid' | 'map';
@@ -27,13 +29,27 @@ function makeFetcher(source: DataSource, arcgisUrl: string) {
     source === 'arcgis' ? fetchArcGISCameras(arcgisUrl) : fetchCameras();
 }
 
+function getInitialCollections(): CollectionId[] {
+  const allowed = new Set(cameraCollections.map((collection) => collection.id));
+  return (new URLSearchParams(window.location.search).get('collections')?.split(',').filter((id): id is CollectionId =>
+    allowed.has(id as CollectionId),
+  ) ?? []);
+}
+
 export default function App() {
-  const [view, setView] = useState<ViewMode>('grid');
+  const [view, setView] = useState<ViewMode>(() =>
+    new URLSearchParams(window.location.search).get('view') === 'map' ? 'map' : 'grid',
+  );
   const [source, setSource] = useState<DataSource>('arcgis');
   const [arcgisUrl, setArcgisUrl] = useState(ARCGIS_FEATURE_SERVICE_URL);
   const [pendingUrl, setPendingUrl] = useState(ARCGIS_FEATURE_SERVICE_URL);
   const [showSettings, setShowSettings] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '');
+  const [activeCollections, setActiveCollections] = useState<CollectionId[]>(getInitialCollections);
+  const [focusedCamera, setFocusedCamera] = useState<TrafficCamera | null>(null);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [healthByCamera, setHealthByCamera] = useState<Record<string, CameraHealth>>({});
+  const [hasHydratedUrlCamera, setHasHydratedUrlCamera] = useState(false);
   const deferredQuery = useDeferredValue(searchQuery);
 
   const swrKey = `cameras-${source}-${arcgisUrl}`;
@@ -43,18 +59,58 @@ export default function App() {
     { refreshInterval: 5 * 60_000, revalidateOnFocus: false },
   );
 
-  const filteredCameras = cameras?.filter(
-    (camera) =>
-      camera.cameralabel.toLowerCase().includes(deferredQuery.toLowerCase()) && camera.imageurl?.url,
+  const filteredCameras = useMemo(
+    () => filterCameras(cameras ?? [], deferredQuery, activeCollections, healthByCamera),
+    [activeCollections, cameras, deferredQuery, healthByCamera],
   );
 
   const withVideo = cameras?.filter((c) => c.video_url?.url).length ?? 0;
+  const issueCount = (Object.values(healthByCamera) as CameraHealth[]).filter((health) => health.lastImageError || health.lastStreamError).length;
+
+  const handleHealthChange = useCallback((camera: TrafficCamera, event: 'image-refresh' | 'image-error' | 'stream-error') => {
+    const id = getCameraId(camera);
+    setHealthByCamera((current) => ({
+      ...current,
+      [id]: {
+        ...current[id],
+        ...(event === 'image-refresh' ? { lastImageRefresh: Date.now(), lastImageError: undefined } : {}),
+        ...(event === 'image-error' ? { lastImageError: Date.now() } : {}),
+        ...(event === 'stream-error' ? { lastStreamError: Date.now() } : {}),
+      },
+    }));
+  }, []);
+
+  function toggleCollection(id: CollectionId) {
+    setActiveCollections((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+    );
+  }
+
+  useEffect(() => {
+    if (!hasHydratedUrlCamera) return;
+    const params = new URLSearchParams(window.location.search);
+    searchQuery ? params.set('q', searchQuery) : params.delete('q');
+    activeCollections.length ? params.set('collections', activeCollections.join(',')) : params.delete('collections');
+    focusedCamera ? params.set('camera', getCameraId(focusedCamera)) : params.delete('camera');
+    view !== 'grid' ? params.set('view', view) : params.delete('view');
+    const query = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+  }, [activeCollections, focusedCamera, hasHydratedUrlCamera, searchQuery, view]);
 
   function applyArcGISUrl() {
     setArcgisUrl(pendingUrl.trim());
     setSource('arcgis');
     setShowSettings(false);
   }
+
+  useEffect(() => {
+    if (!cameras?.length || focusedCamera || hasHydratedUrlCamera) return;
+    const params = new URLSearchParams(window.location.search);
+    const cameraId = params.get('camera');
+    const camera = cameras.find((item) => getCameraId(item) === cameraId);
+    if (camera) setFocusedCamera(camera);
+    setHasHydratedUrlCamera(true);
+  }, [cameras, focusedCamera, hasHydratedUrlCamera]);
 
   return (
     <ErrorBoundary>
@@ -139,6 +195,7 @@ export default function App() {
                 <div className="hidden items-center gap-2 xl:flex">
                   <span className="hud-pill">{cameras.length} cameras online</span>
                   {withVideo > 0 && <span className="hud-pill hud-pill--accent">{withVideo} live streams</span>}
+                  <button onClick={() => setShowDiagnostics((open) => !open)} className="hud-pill transition hover:border-cyan-300/45 hover:text-cyan-100">{issueCount} signal issues</button>
                 </div>
               )}
 
@@ -222,6 +279,37 @@ export default function App() {
           </div>
         </header>
 
+        <section className="mx-auto max-w-7xl px-4 pt-4">
+          <div className="flex gap-2 overflow-x-auto pb-2" aria-label="Camera collections">
+            {cameraCollections.map((collection) => {
+              const active = activeCollections.includes(collection.id);
+              return (
+                <button
+                  key={collection.id}
+                  onClick={() => toggleCollection(collection.id)}
+                  title={collection.description}
+                  className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] transition ${active ? 'border-cyan-300/55 bg-cyan-400/15 text-cyan-100' : 'border-slate-400/20 bg-slate-900/55 text-slate-400 hover:border-slate-300/35 hover:text-slate-200'}`}
+                >
+                  {collection.label}
+                </button>
+              );
+            })}
+            {activeCollections.length > 0 && (
+              <button onClick={() => setActiveCollections([])} className="shrink-0 rounded-full border border-slate-400/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-slate-400 transition hover:text-slate-200">
+                Clear all
+              </button>
+            )}
+          </div>
+          {showDiagnostics && (
+            <div className="mb-4 grid gap-3 rounded-2xl border border-cyan-300/20 bg-slate-900/75 p-4 text-xs text-slate-300 sm:grid-cols-4">
+              <div><p className="text-slate-500">Total cameras</p><p className="mt-1 text-lg text-cyan-100">{cameras?.length ?? '--'}</p></div>
+              <div><p className="text-slate-500">Live streams</p><p className="mt-1 text-lg text-cyan-100">{withVideo}</p></div>
+              <div><p className="text-slate-500">Signal issues</p><p className="mt-1 text-lg text-rose-200">{issueCount}</p></div>
+              <button onClick={() => mutate()} className="rounded-xl border border-cyan-300/35 bg-cyan-500/10 px-3 py-2 text-cyan-100 transition hover:bg-cyan-500/20">Refresh feed</button>
+            </div>
+          )}
+        </section>
+
         {isLoading ? (
           <div className={view === 'map' ? 'p-0' : 'mx-auto max-w-7xl px-4 py-8'}>
             {view === 'map' ? (
@@ -264,7 +352,7 @@ export default function App() {
             </div>
           </div>
         ) : view === 'map' ? (
-          <MapView cameras={cameras ?? []} />
+          <MapView cameras={filteredCameras} healthByCamera={healthByCamera} onFocus={setFocusedCamera} />
         ) : (
           <main className="mx-auto max-w-7xl px-4 pb-24 pt-6 md:py-8">
             <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-400/15 bg-slate-900/55 px-4 py-3">
@@ -300,11 +388,20 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {filteredCameras?.map((camera) => (
-                  <CameraCard key={camera.imageurl.url} camera={camera} />
+                  <CameraCard key={camera.imageurl.url} camera={camera} onFocus={setFocusedCamera} onHealthChange={handleHealthChange} />
                 ))}
               </div>
             )}
           </main>
+        )}
+
+        {focusedCamera && (
+          <FocusCameraModal
+            camera={focusedCamera}
+            cameras={filteredCameras.length ? filteredCameras : cameras ?? []}
+            onClose={() => setFocusedCamera(null)}
+            onSelect={setFocusedCamera}
+          />
         )}
 
         <nav className="mobile-command-dock fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-1.5rem)] max-w-sm -translate-x-1/2 items-center gap-2 rounded-2xl border border-cyan-200/20 bg-slate-950/85 p-2 shadow-[0_18px_35px_rgba(2,8,20,0.7)] backdrop-blur-xl md:hidden">
