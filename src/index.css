@@ -192,3 +192,17 @@ body::before {
     scroll-behavior: auto !important;
   }
 }
+
+.camera-marker--live {
+  background: radial-gradient(circle at 40% 40%, #fda4af 0, #fb7185 45%, #be123c 80%);
+  box-shadow:
+    0 0 0 5px rgba(251, 113, 133, 0.2),
+    0 0 16px rgba(251, 113, 133, 0.82);
+}
+
+.camera-marker--issue {
+  background: radial-gradient(circle at 40% 40%, #fde68a 0, #f59e0b 50%, #92400e 86%);
+  box-shadow:
+    0 0 0 5px rgba(245, 158, 11, 0.22),
+    0 0 18px rgba(245, 158, 11, 0.86);
+}
