@@ -206,3 +206,9 @@ body::before {
     0 0 0 5px rgba(245, 158, 11, 0.22),
     0 0 18px rgba(245, 158, 11, 0.86);
 }
+
+.camera-marker--selected {
+  outline: 3px solid rgba(255, 255, 255, 0.92);
+  outline-offset: 3px;
+  transform: scale(1.28);
+}

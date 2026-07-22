@@ -36,7 +36,22 @@ export function getCameraCoordinates(camera: TrafficCamera): { lat: number; lng:
 export function cameraMatchesQuery(camera: TrafficCamera, query: string): boolean {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return true;
-  return camera.cameralabel.toLowerCase().includes(normalized);
+  const coords = getCameraCoordinates(camera);
+  const searchableText = [
+    camera.cameralabel,
+    camera.web_url?.url,
+    camera.video_url?.url,
+    camera.imageurl?.url,
+    coords ? `${coords.lat.toFixed(4)} ${coords.lng.toFixed(4)}` : '',
+    coords ? `${coords.lat}, ${coords.lng}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return normalized
+    .split(/\s+/)
+    .every((token) => searchableText.includes(token));
 }
 
 function labelIncludes(camera: TrafficCamera, words: string[]): boolean {
@@ -94,13 +109,18 @@ export function filterCameras(
   query: string,
   activeCollections: CollectionId[],
   healthByCamera: Record<string, CameraHealth>,
+  collectionMode: 'all' | 'any' = 'all',
 ): TrafficCamera[] {
   return cameras.filter((camera) => {
     if (!camera.imageurl?.url || !cameraMatchesQuery(camera, query)) return false;
-    return activeCollections.every((id) => {
+    if (activeCollections.length === 0) return true;
+
+    const matcher = (id: CollectionId) => {
       const collection = cameraCollections.find((c) => c.id === id);
       return collection ? collection.matches(camera, healthByCamera[getCameraId(camera)]) : true;
-    });
+    };
+
+    return collectionMode === 'all' ? activeCollections.every(matcher) : activeCollections.some(matcher);
   });
 }
 

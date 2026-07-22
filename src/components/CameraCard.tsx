@@ -5,12 +5,13 @@ import { TrafficCamera } from '../types';
 
 interface CameraCardProps {
   camera: TrafficCamera;
+  searchQuery?: string;
   refreshInterval?: number;
   onFocus?: (camera: TrafficCamera) => void;
   onHealthChange?: (camera: TrafficCamera, event: 'image-refresh' | 'image-error' | 'stream-error') => void;
 }
 
-export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval = 30_000, onFocus, onHealthChange }) => {
+export const CameraCard: React.FC<CameraCardProps> = ({ camera, searchQuery = '', refreshInterval = 30_000, onFocus, onHealthChange }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [isInView, setIsInView] = useState(false);
   const [timestamp, setTimestamp] = useState(Date.now());
@@ -48,6 +49,15 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval 
 
   const imageUrl = `${camera.imageurl.url}?t=${timestamp}`;
   const videoUrl = camera.video_url?.url;
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const labelIndex = normalizedQuery ? camera.cameralabel.toLowerCase().indexOf(normalizedQuery) : -1;
+  const highlightedLabel = labelIndex >= 0 ? (
+    <>
+      {camera.cameralabel.slice(0, labelIndex)}
+      <mark className="rounded bg-cyan-300/25 px-0.5 text-cyan-50">{camera.cameralabel.slice(labelIndex, labelIndex + normalizedQuery.length)}</mark>
+      {camera.cameralabel.slice(labelIndex + normalizedQuery.length)}
+    </>
+  ) : camera.cameralabel;
 
   return (
     <article
@@ -62,10 +72,10 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval 
             <MapPin className="h-3.5 w-3.5" />
           </span>
           <h3
-            className="truncate text-[11px] font-medium uppercase tracking-[0.12em] text-slate-200"
+            className="truncate text-xs font-medium uppercase tracking-[0.1em] text-slate-100"
             title={camera.cameralabel}
           >
-            {camera.cameralabel}
+            {highlightedLabel}
           </h3>
         </div>
         <div className="ml-2 flex shrink-0 items-center gap-1.5">
@@ -78,7 +88,7 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval 
               Live
             </div>
           ) : (
-            <span className="text-[10px] text-slate-500">
+            <span className="text-[11px] text-slate-300">
               {new Date(timestamp).toLocaleTimeString([], {
                 hour: '2-digit',
                 minute: '2-digit',
@@ -109,7 +119,7 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval 
             src={imageUrl}
             alt={camera.cameralabel}
             className={cn(
-              'h-full w-full object-cover transition-opacity duration-500',
+              'h-full w-full cursor-pointer object-cover transition-opacity duration-500',
               isImgLoading ? 'opacity-65' : 'opacity-100',
             )}
             onClick={() => onFocus?.(camera)}
@@ -129,8 +139,15 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval 
 
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-slate-950/75 via-slate-900/10 to-transparent opacity-90" />
 
-        <div className="absolute inset-x-0 bottom-0 flex translate-y-0 items-center justify-between gap-2 p-3 sm:translate-y-full sm:transition-transform sm:duration-200 sm:group-hover:translate-y-0">
-          <span className="rounded-md border border-slate-300/20 bg-slate-950/70 px-1.5 py-1 text-[10px] text-slate-300 backdrop-blur">
+        <div className="absolute inset-x-0 bottom-0 flex translate-y-0 items-center justify-between gap-2 p-3 sm:translate-y-2 sm:opacity-90 sm:transition-all sm:duration-200 sm:group-hover:translate-y-0 sm:group-hover:opacity-100 sm:group-focus-within:translate-y-0 sm:group-focus-within:opacity-100">
+          <button
+            onClick={() => onFocus?.(camera)}
+            className="rounded-md border border-cyan-300/35 bg-slate-950/75 px-2 py-1 text-[11px] text-cyan-100 backdrop-blur transition hover:bg-cyan-500/15"
+            aria-label={`Open focus mode for ${camera.cameralabel}`}
+          >
+            View camera
+          </button>
+          <span className="hidden rounded-md border border-slate-300/20 bg-slate-950/70 px-1.5 py-1 text-[11px] text-slate-200 backdrop-blur sm:inline">
             {parseFloat(camera.location.latitude).toFixed(4)}, {parseFloat(camera.location.longitude).toFixed(4)}
           </span>
           <div className="flex items-center gap-2">
@@ -139,6 +156,7 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval 
                 onClick={() => setIsVideoPlaying(true)}
                 className="rounded-full border border-cyan-300/35 bg-cyan-500/15 p-1.5 text-cyan-200 transition hover:bg-cyan-500/25"
                 title="Play live stream"
+                aria-label={`Play live stream for ${camera.cameralabel}`}
               >
                 <VideoIcon className="h-3.5 w-3.5" />
               </button>
@@ -147,7 +165,8 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval 
               <button
                 onClick={() => setIsVideoPlaying(false)}
                 className="rounded-full border border-rose-300/40 bg-rose-500/20 p-1.5 text-rose-200 transition hover:bg-rose-500/35"
-                title="Stop stream"
+                title="Stop live stream"
+                aria-label={`Stop live stream for ${camera.cameralabel}`}
               >
                 <VideoIcon className="h-3.5 w-3.5" />
               </button>
@@ -158,7 +177,8 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, refreshInterval 
                 target="_blank"
                 rel="noopener noreferrer"
                 className="rounded-full border border-slate-300/25 bg-slate-950/70 p-1.5 text-slate-200 transition hover:border-slate-200/40"
-                title="Open on SDOT"
+                title="Open SDOT page"
+                aria-label={`Open SDOT page for ${camera.cameralabel}`}
               >
                 <ExternalLink className="h-3.5 w-3.5" />
               </a>
@@ -189,24 +209,45 @@ function NativeVideoPlayer({
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = url;
       video.play().catch(() => {});
-    } else if (typeof (window as any).Hls !== 'undefined') {
-      const Hls = (window as any).Hls;
-      const hls = new Hls({ enableWorker: true });
-      hls.loadSource(url);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(() => {});
-      });
-      hls.on(Hls.Events.ERROR, (_: any, data: any) => {
-        if (data.fatal) {
-          setError(true);
-          onError?.();
-        }
-      });
-      return () => hls.destroy();
     } else {
-      setError(true);
-      onError?.();
+      let hlsInstance: import('hls.js').default | null = null;
+      let isDisposed = false;
+
+      import('hls.js').then(
+        ({ default: Hls }) => {
+          if (isDisposed) return;
+          if (!Hls.isSupported()) {
+            setError(true);
+            onError?.();
+            return;
+          }
+
+          const hls = new Hls({ enableWorker: true });
+          hlsInstance = hls;
+          hls.loadSource(url);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.play().catch(() => {});
+          });
+          hls.on(Hls.Events.ERROR, (_event, data) => {
+            if (data.fatal) {
+              setError(true);
+              onError?.();
+            }
+          });
+        },
+        () => {
+          if (!isDisposed) {
+            setError(true);
+            onError?.();
+          }
+        },
+      );
+
+      return () => {
+        isDisposed = true;
+        hlsInstance?.destroy();
+      };
     }
   }, [url, onError]);
 
