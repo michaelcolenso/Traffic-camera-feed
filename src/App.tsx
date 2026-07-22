@@ -43,6 +43,7 @@ export default function App() {
   const [source, setSource] = useState<DataSource>('arcgis');
   const [arcgisUrl, setArcgisUrl] = useState(ARCGIS_FEATURE_SERVICE_URL);
   const [pendingUrl, setPendingUrl] = useState(ARCGIS_FEATURE_SERVICE_URL);
+  const [arcgisUrlError, setArcgisUrlError] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [searchQuery, setSearchQuery] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '');
   const [activeCollections, setActiveCollections] = useState<CollectionId[]>(getInitialCollections);
@@ -98,9 +99,27 @@ export default function App() {
   }, [activeCollections, focusedCamera, hasHydratedUrlCamera, searchQuery, view]);
 
   function applyArcGISUrl() {
-    setArcgisUrl(pendingUrl.trim());
+    const nextUrl = pendingUrl.trim();
+
+    try {
+      const parsedUrl = new URL(nextUrl);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol) || !parsedUrl.pathname.toLowerCase().includes('featureserver')) {
+        throw new Error('ArcGIS URL must use http(s) and include a FeatureServer endpoint.');
+      }
+    } catch {
+      setArcgisUrlError('Enter a valid ArcGIS FeatureServer endpoint before switching sources.');
+      return;
+    }
+
+    setArcgisUrlError('');
+    setArcgisUrl(nextUrl);
     setSource('arcgis');
     setShowSettings(false);
+  }
+
+  function restoreDefaultArcGISUrl() {
+    setPendingUrl(ARCGIS_FEATURE_SERVICE_URL);
+    setArcgisUrlError('');
   }
 
   useEffect(() => {
@@ -129,7 +148,7 @@ export default function App() {
                       Seattle Traffic Watch
                     </h1>
                     <p className="truncate text-[10px] uppercase tracking-[0.14em] text-cyan-100/75">
-                      Live city telemetry · optimized for rapid scanning
+                      Live traffic cameras · optimized for rapid scanning
                     </p>
                   </div>
                   <button
@@ -144,7 +163,7 @@ export default function App() {
 
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <div className="rounded-2xl border border-cyan-300/25 bg-slate-950/45 px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-[0.16em] text-slate-400">Online nodes</p>
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-slate-300">Cameras</p>
                     <p className="mt-1 text-lg font-semibold text-cyan-200">{cameras?.length ?? '--'}</p>
                   </div>
                   <div className="rounded-2xl border border-cyan-300/25 bg-slate-950/45 px-3 py-2">
@@ -166,7 +185,8 @@ export default function App() {
                   {searchQuery && (
                     <button
                       onClick={() => setSearchQuery('')}
-                      className="rounded-lg border border-slate-300/20 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-slate-300"
+                      className="rounded-lg border border-slate-300/20 px-2 py-1 text-[11px] uppercase tracking-[0.12em] text-slate-200"
+                      aria-label="Clear camera search"
                     >
                       Clear
                     </button>
@@ -185,7 +205,7 @@ export default function App() {
                   <h1 className="font-display truncate text-[0.95rem] font-semibold tracking-[0.08em] text-slate-100">
                     Seattle Traffic Watch
                   </h1>
-                  <p className="truncate text-[10px] uppercase tracking-[0.16em] text-slate-400">
+                  <p className="truncate text-[11px] uppercase tracking-[0.14em] text-slate-300">
                     {source === 'arcgis' ? 'ArcGIS feed | SDOT cameras' : 'Socrata feed | SDOT data'}
                   </p>
                 </div>
@@ -195,7 +215,13 @@ export default function App() {
                 <div className="hidden items-center gap-2 xl:flex">
                   <span className="hud-pill">{cameras.length} cameras online</span>
                   {withVideo > 0 && <span className="hud-pill hud-pill--accent">{withVideo} live streams</span>}
-                  <button onClick={() => setShowDiagnostics((open) => !open)} className="hud-pill transition hover:border-cyan-300/45 hover:text-cyan-100">{issueCount} signal issues</button>
+                  <button
+                    onClick={() => setShowDiagnostics((open) => !open)}
+                    className="hud-pill transition hover:border-cyan-300/45 hover:text-cyan-100"
+                    aria-expanded={showDiagnostics}
+                  >
+                    {issueCount} signal issues
+                  </button>
                 </div>
               )}
 
@@ -204,7 +230,7 @@ export default function App() {
                 <input
                   type="text"
                   aria-label="Search cameras"
-                  placeholder="Locate camera node..."
+                  placeholder="Search intersection, corridor, bridge, or camera ID"
                   className="w-full rounded-xl border border-slate-400/20 bg-slate-900/70 py-2 pl-9 pr-3 text-sm text-slate-200 placeholder:text-slate-500 focus:border-cyan-300/55 focus:outline-none focus:ring-2 focus:ring-cyan-400/25"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -247,32 +273,53 @@ export default function App() {
                   <button
                     onClick={() => {
                       setSource('sdot');
+                      setArcgisUrlError('');
                       setShowSettings(false);
                     }}
                     className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs transition ${source === 'sdot' ? 'border-cyan-300/55 bg-cyan-500/10 text-cyan-200' : 'border-slate-400/20 bg-slate-900/80 text-slate-300 hover:border-slate-300/35'}`}
                   >
                     <Database className="h-3.5 w-3.5" />
-                    SDOT Socrata API
+                    Use SDOT Socrata
                   </button>
 
                   <div className="flex min-w-72 flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-                    <input
-                      type="url"
-                      value={pendingUrl}
-                      onChange={(e) => setPendingUrl(e.target.value)}
-                      placeholder="ArcGIS Feature Service URL..."
-                      className="w-full rounded-xl border border-slate-400/20 bg-slate-950/75 py-2 px-3 text-xs text-slate-200 placeholder:text-slate-500 focus:border-cyan-300/55 focus:outline-none focus:ring-2 focus:ring-cyan-400/25"
-                    />
+                    <label className="sr-only" htmlFor="arcgis-url">ArcGIS Feature Service URL</label>
+                    <div className="flex-1">
+                      <input
+                        id="arcgis-url"
+                        type="url"
+                        value={pendingUrl}
+                        onChange={(e) => {
+                          setPendingUrl(e.target.value);
+                          if (arcgisUrlError) setArcgisUrlError('');
+                        }}
+                        placeholder="ArcGIS Feature Service URL..."
+                        aria-invalid={Boolean(arcgisUrlError)}
+                        aria-describedby={arcgisUrlError ? 'arcgis-url-error' : 'arcgis-url-help'}
+                        className="w-full rounded-xl border border-slate-400/20 bg-slate-950/75 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:border-cyan-300/55 focus:outline-none focus:ring-2 focus:ring-cyan-400/25"
+                      />
+                    </div>
                     <button
                       onClick={applyArcGISUrl}
                       className="rounded-xl border border-cyan-300/55 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-400/20"
                     >
                       Use ArcGIS
                     </button>
+                    <button
+                      onClick={restoreDefaultArcGISUrl}
+                      className="rounded-xl border border-slate-300/20 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-slate-200/35"
+                    >
+                      Restore default
+                    </button>
                   </div>
                 </div>
-                <p className="mt-2 text-[10px] uppercase tracking-[0.12em] text-slate-500">
-                  Paste the FeatureServer/0 endpoint from Seattle City GIS hub.
+                {arcgisUrlError && (
+                  <p id="arcgis-url-error" className="mt-2 text-xs text-rose-200">
+                    {arcgisUrlError}
+                  </p>
+                )}
+                <p id="arcgis-url-help" className="mt-2 text-xs text-slate-300">
+                  Current source: {source === 'arcgis' ? 'ArcGIS FeatureServer' : 'SDOT Socrata'}. Paste a Seattle GIS FeatureServer endpoint or restore the default.
                 </p>
               </div>
             )}
@@ -289,17 +336,24 @@ export default function App() {
                   onClick={() => toggleCollection(collection.id)}
                   title={collection.description}
                   className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] transition ${active ? 'border-cyan-300/55 bg-cyan-400/15 text-cyan-100' : 'border-slate-400/20 bg-slate-900/55 text-slate-400 hover:border-slate-300/35 hover:text-slate-200'}`}
+                  aria-pressed={active}
                 >
                   {collection.label}
+                  <span className="ml-1.5 rounded-full bg-slate-950/60 px-1.5 text-[10px] text-slate-200">
+                    {(cameras ?? []).filter((camera) => collection.matches(camera, healthByCamera[getCameraId(camera)])).length}
+                  </span>
                 </button>
               );
             })}
             {activeCollections.length > 0 && (
-              <button onClick={() => setActiveCollections([])} className="shrink-0 rounded-full border border-slate-400/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-slate-400 transition hover:text-slate-200">
+              <button onClick={() => setActiveCollections([])} className="shrink-0 rounded-full border border-slate-400/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-slate-300 transition hover:text-slate-100">
                 Clear all
               </button>
             )}
           </div>
+          <p className="pb-3 text-xs text-slate-300">
+            Filters match all selected collections. Use clear all to return to every camera.
+          </p>
           {showDiagnostics && (
             <div className="mb-4 grid gap-3 rounded-2xl border border-cyan-300/20 bg-slate-900/75 p-4 text-xs text-slate-300 sm:grid-cols-4">
               <div><p className="text-slate-500">Total cameras</p><p className="mt-1 text-lg text-cyan-100">{cameras?.length ?? '--'}</p></div>
@@ -336,7 +390,7 @@ export default function App() {
                 <AlertTriangle className="h-7 w-7" />
               </div>
               <h2 className="font-display text-lg tracking-[0.08em] text-slate-100">
-                Camera network unreachable
+                Couldn’t load cameras
               </h2>
               <p className="mt-2 text-sm text-slate-400">
                 {source === 'arcgis'
@@ -347,8 +401,22 @@ export default function App() {
                 onClick={() => mutate()}
                 className="mt-5 rounded-xl border border-cyan-300/50 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200 transition hover:bg-cyan-500/20"
               >
-                Retry sync
+                Retry
               </button>
+              <div className="mt-3 flex flex-wrap justify-center gap-2">
+                <button
+                  onClick={() => setSource(source === 'arcgis' ? 'sdot' : 'arcgis')}
+                  className="rounded-xl border border-slate-300/25 px-3 py-2 text-xs text-slate-200 transition hover:border-slate-200/40"
+                >
+                  Try {source === 'arcgis' ? 'SDOT Socrata' : 'ArcGIS'} source
+                </button>
+                <button
+                  onClick={() => setShowSettings(true)}
+                  className="rounded-xl border border-slate-300/25 px-3 py-2 text-xs text-slate-200 transition hover:border-slate-200/40"
+                >
+                  Open source settings
+                </button>
+              </div>
             </div>
           </div>
         ) : view === 'map' ? (
@@ -357,7 +425,7 @@ export default function App() {
           <main className="mx-auto max-w-7xl px-4 pb-24 pt-6 md:py-8">
             <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-400/15 bg-slate-900/55 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                Visible nodes
+                Visible cameras
                 <span className="ml-2 text-cyan-200">{filteredCameras?.length}</span>
                 <span className="mx-1 text-slate-500">/</span>
                 <span className="text-slate-300">{cameras?.length}</span>
@@ -365,7 +433,7 @@ export default function App() {
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="flex items-center gap-1 rounded-lg border border-slate-400/20 px-2 py-1 text-[11px] uppercase tracking-[0.12em] text-slate-400 transition hover:border-slate-300/35 hover:text-slate-200"
+                  className="flex items-center gap-1 rounded-lg border border-slate-400/20 px-2 py-1 text-[11px] uppercase tracking-[0.12em] text-slate-300 transition hover:border-slate-300/35 hover:text-slate-100"
                 >
                   <X className="h-3 w-3" />
                   Clear filter
@@ -376,14 +444,27 @@ export default function App() {
             {filteredCameras?.length === 0 ? (
               <div className="glass-panel mx-auto max-w-xl rounded-3xl px-6 py-16 text-center">
                 <p className="font-display text-sm uppercase tracking-[0.16em] text-slate-200">
-                  No camera nodes match "{searchQuery}"
+                  No cameras match {searchQuery ? `"${searchQuery}"` : 'the selected filters'}
                 </p>
+                {activeCollections.length > 0 && (
+                  <p className="mt-3 text-sm text-slate-300">
+                    Active filters: {activeCollections.join(', ')}
+                  </p>
+                )}
                 <button
                   onClick={() => setSearchQuery('')}
                   className="mt-4 rounded-xl border border-cyan-300/45 bg-cyan-500/10 px-3 py-2 text-xs uppercase tracking-[0.14em] text-cyan-200 transition hover:bg-cyan-500/20"
                 >
                   Reset query
                 </button>
+                {activeCollections.length > 0 && (
+                  <button
+                    onClick={() => setActiveCollections([])}
+                    className="ml-2 mt-4 rounded-xl border border-slate-300/25 px-3 py-2 text-xs uppercase tracking-[0.14em] text-slate-200 transition hover:border-slate-200/40"
+                  >
+                    Clear filters
+                  </button>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -421,9 +502,11 @@ export default function App() {
           </button>
           <button
             onClick={() => setSource((current) => (current === 'arcgis' ? 'sdot' : 'arcgis'))}
-            className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-400/25 px-3 py-2 text-[11px] text-slate-300"
+            className="flex min-w-20 items-center justify-center gap-1.5 rounded-xl border border-slate-400/25 px-3 py-2 text-[11px] text-slate-200"
+            aria-label={`Switch data source from ${source === 'arcgis' ? 'ArcGIS' : 'SDOT Socrata'}`}
           >
             {source === 'arcgis' ? <Satellite className="h-3.5 w-3.5" /> : <Radio className="h-3.5 w-3.5" />}
+            Source
           </button>
         </nav>
       </div>
