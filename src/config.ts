@@ -1,16 +1,14 @@
 // App configuration
-// Cloudflare Worker proxy URL for video streams
-export const VIDEO_PROXY_URL = 'https://seattle-video-proxy.aged-morning-c8e4.workers.dev';
+// Video is proxied through the same Cloudflare Worker that serves the SPA.
+export const VIDEO_PROXY_URL = '/api/video';
 
 // Video stream server (Wowza Streaming Engine)
 export const VIDEO_SERVER = '61e0c5d388c2e.streamlock.net';
 
 /**
- * Get video URL with CORS proxy
+ * Get a same-origin video URL through the Cloudflare Worker proxy.
  * SDOT uses Wowza: https://61e0c5d388c2e.streamlock.net/live/STREAM_NAME.stream/playlist.m3u8
  */
 export function getVideoUrl(streamPath: string): string {
-  // streamPath like: /live/STREAM_NAME.stream/playlist.m3u8
-  const proxyBase = VIDEO_PROXY_URL.replace(/\/$/, '');
-  return `${proxyBase}?url=${encodeURIComponent(streamPath)}`;
+  return `${VIDEO_PROXY_URL}?url=${encodeURIComponent(streamPath)}`;
 }
