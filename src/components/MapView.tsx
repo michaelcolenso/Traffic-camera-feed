@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Map as MapLibreMap, Marker as MapLibreMarker, StyleSpecification } from 'maplibre-gl';
+import maplibregl from 'maplibre-gl';
 import { ExternalLink, LocateFixed, RefreshCw, Video as VideoIcon, X } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { TrafficCamera } from '../types';
 import { CameraHealth, getCameraId } from '../lib/cameras';
 
-const DARK_STYLE: StyleSpecification = {
+const DARK_STYLE: maplibregl.StyleSpecification = {
   version: 8,
   sources: {
     'carto-dark': {
@@ -33,8 +33,6 @@ const DARK_STYLE: StyleSpecification = {
 
 const SEATTLE_CENTER: [number, number] = [-122.3321, 47.6062];
 
-type MapLibreModule = typeof import('maplibre-gl');
-
 interface MapViewProps {
   cameras: TrafficCamera[];
   healthByCamera?: Record<string, CameraHealth>;
@@ -54,10 +52,8 @@ function getCoordinates(camera: TrafficCamera): { lat: number; lng: number } | n
 
 export function MapView({ cameras, healthByCamera = {}, onFocus }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<MapLibreMap | null>(null);
-  const maplibreRef = useRef<MapLibreModule['default'] | null>(null);
-  const markersRef = useRef<MapLibreMarker[]>([]);
-  const [mapReady, setMapReady] = useState(false);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const markersRef = useRef<maplibregl.Marker[]>([]);
   const [selected, setSelected] = useState<TrafficCamera | null>(null);
   const [imgTimestamp, setImgTimestamp] = useState(Date.now());
 
@@ -73,20 +69,15 @@ export function MapView({ cameras, healthByCamera = {}, onFocus }: MapViewProps)
   const handleClose = useCallback(() => setSelected(null), []);
   const fitVisibleCameras = useCallback(() => {
     const map = mapRef.current;
-    const maplibre = maplibreRef.current;
-    if (!map || !maplibre || mappableCameras.length === 0) return;
+    if (!map || mappableCameras.length === 0) return;
 
-    const bounds = new maplibre.LngLatBounds();
+    const bounds = new maplibregl.LngLatBounds();
     mappableCameras.forEach((camera) => {
       const coords = getCoordinates(camera);
       if (coords) bounds.extend([coords.lng, coords.lat]);
     });
 
-    map.fitBounds(bounds, {
-      padding: 72,
-      maxZoom: 14,
-      duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 420,
-    });
+    map.fitBounds(bounds, { padding: 72, maxZoom: 14, duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 420 });
   }, [mappableCameras]);
 
   const returnToSeattle = useCallback(() => {
@@ -100,43 +91,30 @@ export function MapView({ cameras, healthByCamera = {}, onFocus }: MapViewProps)
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    let cancelled = false;
-    let map: MapLibreMap | null = null;
-
-    void import('maplibre-gl').then(({ default: maplibre }) => {
-      if (cancelled || !containerRef.current) return;
-
-      maplibreRef.current = maplibre;
-      map = new maplibre.Map({
-        container: containerRef.current,
-        style: DARK_STYLE,
-        center: SEATTLE_CENTER,
-        zoom: 11,
-        attributionControl: false,
-      });
-
-      map.addControl(new maplibre.AttributionControl({ compact: true }), 'bottom-left');
-      map.addControl(new maplibre.NavigationControl({ showCompass: false }), 'top-right');
-
-      mapRef.current = map;
-      setMapReady(true);
+    const map = new maplibregl.Map({
+      container: containerRef.current,
+      style: DARK_STYLE,
+      center: SEATTLE_CENTER,
+      zoom: 11,
+      attributionControl: false,
     });
 
+    map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+
+    mapRef.current = map;
+
     return () => {
-      cancelled = true;
-      markersRef.current.forEach((marker) => marker.remove());
+      markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
-      map?.remove();
+      map.remove();
       mapRef.current = null;
-      maplibreRef.current = null;
-      setMapReady(false);
     };
   }, []);
 
   useEffect(() => {
     const map = mapRef.current;
-    const maplibre = maplibreRef.current;
-    if (!map || !maplibre || !mapReady) return;
+    if (!map) return;
 
     markersRef.current.forEach((marker) => marker.remove());
     markersRef.current = [];
@@ -152,12 +130,12 @@ export function MapView({ cameras, healthByCamera = {}, onFocus }: MapViewProps)
       el.setAttribute('aria-label', `View ${camera.cameralabel}`);
       el.setAttribute('title', camera.cameralabel);
 
-      const marker = new maplibre.Marker({ element: el })
+      const marker = new maplibregl.Marker({ element: el })
         .setLngLat([coords.lng, coords.lat])
         .addTo(map);
 
-      el.addEventListener('click', (event) => {
-        event.stopPropagation();
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
         setSelected(camera);
         setImgTimestamp(Date.now());
         map.flyTo({
@@ -169,19 +147,11 @@ export function MapView({ cameras, healthByCamera = {}, onFocus }: MapViewProps)
 
       markersRef.current.push(marker);
     });
-  }, [mappableCameras, healthByCamera, mapReady, selected]);
+  }, [mappableCameras, healthByCamera, selected]);
 
   return (
     <div className="relative w-full" style={{ height: 'calc(100vh - 84px)' }}>
       <div ref={containerRef} className="absolute inset-0" />
-
-      {!mapReady && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-slate-950/75">
-          <div className="rounded-2xl border border-cyan-300/20 bg-slate-900/80 px-4 py-3 text-xs uppercase tracking-[0.2em] text-cyan-200/80 shadow-[0_0_24px_rgba(41,216,255,0.18)]">
-            Loading map engine...
-          </div>
-        </div>
-      )}
 
       <div className="absolute left-4 top-4 rounded-full border border-cyan-300/45 bg-slate-950/80 px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-cyan-100 backdrop-blur-md">
         {mappableCameras.length} active cameras
@@ -224,8 +194,8 @@ export function MapView({ cameras, healthByCamera = {}, onFocus }: MapViewProps)
               src={`${selected.imageurl.url}?t=${imgTimestamp}`}
               alt={selected.cameralabel}
               className="h-full w-full object-cover"
-              onError={(event) => {
-                (event.target as HTMLImageElement).style.display = 'none';
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
               }}
             />
           </div>
