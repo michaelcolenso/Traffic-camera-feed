@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Validate, build, and deploy
+    name: Validate, build, deploy, and smoke test
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -52,3 +52,26 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
+
+      - name: Smoke test production
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          home_ok=0
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error --max-time 10 https://cams.hoxel.dev/ -o /tmp/cams-home \
+              && grep -q '<div id="root"></div>' /tmp/cams-home; then
+              home_ok=1
+              break
+            fi
+            echo "Home page not ready yet (attempt ${attempt}/12)"
+            sleep 5
+          done
+          test "$home_ok" -eq 1 || { echo "cams.hoxel.dev did not become healthy"; exit 1; }
+
+          api_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-api -w '%{http_code}' https://cams.hoxel.dev/api/video)"
+          test "$api_status" = "400" || { echo "Expected /api/video without a URL to return 400, got ${api_status}"; cat /tmp/cams-api; exit 1; }
+          grep -q 'Invalid or missing video path' /tmp/cams-api || { echo "Unexpected /api/video response body"; cat /tmp/cams-api; exit 1; }
+
+          echo "Production smoke test passed"
