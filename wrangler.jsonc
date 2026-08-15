@@ -11,7 +11,7 @@
   },
   "routes": [
     {
-      "pattern": "traffic.hoxel.dev",
+      "pattern": "cams.hoxel.dev",
       "custom_domain": true
     }
   ],
