@@ -96,3 +96,43 @@ jobs:
             lighthouse-mobile.json
             lighthouse-desktop.json
           retention-days: 14
+
+      - name: Enforce performance budgets
+        shell: python
+        run: |
+          import json
+          import sys
+
+          with open('lighthouse-mobile.json') as f:
+              mobile = json.load(f)
+          with open('lighthouse-desktop.json') as f:
+              desktop = json.load(f)
+
+          def score(report, category):
+              return round(report['categories'][category]['score'] * 100)
+
+          def numeric(report, audit):
+              return report['audits'][audit]['numericValue']
+
+          failures = []
+          checks = [
+              ('mobile performance', score(mobile, 'performance'), 85, '>='),
+              ('mobile accessibility', score(mobile, 'accessibility'), 100, '>='),
+              ('desktop performance', score(desktop, 'performance'), 95, '>='),
+              ('desktop accessibility', score(desktop, 'accessibility'), 100, '>='),
+              ('mobile LCP ms', numeric(mobile, 'largest-contentful-paint'), 4000, '<='),
+              ('mobile TBT ms', numeric(mobile, 'total-blocking-time'), 1000, '<='),
+              ('mobile CLS', numeric(mobile, 'cumulative-layout-shift'), 0.1, '<='),
+          ]
+
+          for name, actual, limit, op in checks:
+              passed = actual >= limit if op == '>=' else actual <= limit
+              print(f"{'PASS' if passed else 'FAIL'} {name}: {actual:.2f} {op} {limit}")
+              if not passed:
+                  failures.append(f'{name}: {actual:.2f} (required {op} {limit})')
+
+          if failures:
+              print('\nPerformance budget failures:')
+              for failure in failures:
+                  print(f'- {failure}')
+              sys.exit(1)

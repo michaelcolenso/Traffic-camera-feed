@@ -26,8 +26,8 @@ type ViewMode = 'grid' | 'map';
 type DataSource = 'sdot' | 'arcgis';
 type CollectionMode = 'all' | 'any';
 
-const INITIAL_CAMERA_COUNT = 24;
-const CAMERA_PAGE_SIZE = 24;
+const INITIAL_CAMERA_COUNT = 12;
+const CAMERA_PAGE_SIZE = 12;
 
 function makeFetcher(source: DataSource, arcgisUrl: string) {
   return (_key: string): Promise<TrafficCamera[]> =>

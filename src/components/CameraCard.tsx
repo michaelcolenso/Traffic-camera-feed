@@ -12,6 +12,21 @@ interface CameraCardProps {
   onHealthChange?: (camera: TrafficCamera, event: 'image-refresh' | 'image-error' | 'stream-error') => void;
 }
 
+function getSnapshotUrl(sourceUrl: string, timestamp: number): string {
+  try {
+    const parsed = new URL(sourceUrl);
+    if (parsed.hostname === 'www.seattle.gov' && parsed.pathname.startsWith('/trafficcams/images/')) {
+      const version = Math.floor(timestamp / 30_000);
+      return `/api/image?path=${encodeURIComponent(parsed.pathname)}&v=${version}`;
+    }
+  } catch {
+    // Fall through to the source URL for non-standard feeds.
+  }
+
+  const separator = sourceUrl.includes('?') ? '&' : '?';
+  return `${sourceUrl}${separator}t=${timestamp}`;
+}
+
 export const CameraCard: React.FC<CameraCardProps> = ({ camera, searchQuery = '', refreshInterval = 30_000, priority = false, onFocus, onHealthChange }) => {
   const cardRef = useRef<HTMLElement>(null);
   const [isInView, setIsInView] = useState(false);
@@ -62,7 +77,7 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, searchQuery = ''
     }
   }, [isInView, isVideoPlaying]);
 
-  const imageUrl = `${camera.imageurl.url}?t=${timestamp}`;
+  const imageUrl = getSnapshotUrl(camera.imageurl.url, timestamp);
   const videoUrl = camera.video_url?.url;
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const labelIndex = normalizedQuery ? camera.cameralabel.toLowerCase().indexOf(normalizedQuery) : -1;
