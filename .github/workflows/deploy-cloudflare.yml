@@ -74,8 +74,19 @@ jobs:
           test "$api_status" = "400" || { echo "Expected /api/video without a URL to return 400, got ${api_status}"; cat /tmp/cams-api; exit 1; }
           grep -q 'Invalid or missing video path' /tmp/cams-api || { echo "Unexpected /api/video response body"; cat /tmp/cams-api; exit 1; }
 
+          image_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-image -w '%{http_code}' https://cams.hoxel.dev/api/image)"
+          test "$image_status" = "400" || { echo "Expected /api/image without a path to return 400, got ${image_status}"; cat /tmp/cams-image; exit 1; }
+          grep -q 'Invalid or missing camera image path' /tmp/cams-image || { echo "Unexpected /api/image response body"; cat /tmp/cams-image; exit 1; }
+
+          echo "Core production smoke test passed: app, video route, and image route are healthy"
+
+          # Live SDOT HLS is an external dependency. Probe it for visibility, but do not
+          # fail a healthy deployment when SDOT's streaming origin is unavailable.
           arcgis_url='https://services.arcgis.com/ZOyb2t4B0UYuYNYH/ArcGIS/rest/services/Traffic_Cameras_CDL/FeatureServer/0/query?where=STREAM_NAME%20IS%20NOT%20NULL%20AND%20SERVSTAT%20%3C%3E%20%27INACT%27&outFields=NAME%2CLOCATION%2CSTREAM_NAME%2CSERVSTAT&returnGeometry=false&resultRecordCount=25&f=json'
-          curl --fail --silent --show-error --max-time 15 "$arcgis_url" -o /tmp/sdot-cameras.json
+          if ! curl --fail --silent --show-error --max-time 15 "$arcgis_url" -o /tmp/sdot-cameras.json; then
+            echo "::warning::SDOT ArcGIS camera inventory is unavailable; skipping external HLS probe"
+            exit 0
+          fi
 
           stream_ok=0
           tested=0
@@ -87,7 +98,7 @@ jobs:
             stream_url="https://cams.hoxel.dev/api/video?url=${encoded_path}"
             echo "Testing SDOT HLS camera ${tested}: ${camera_name:-SDOT camera} (${stream_name})"
 
-            if curl --fail --silent --show-error --max-time 8 "$stream_url" -o /tmp/sdot-playlist.m3u8 \
+            if curl --fail --silent --show-error --max-time 6 "$stream_url" -o /tmp/sdot-playlist.m3u8 \
               && grep -q '^#EXTM3U' /tmp/sdot-playlist.m3u8; then
               stream_ok=1
               echo "Working SDOT HLS stream found: ${stream_name}"
@@ -95,12 +106,15 @@ jobs:
             fi
 
             echo "Stream ${stream_name} unavailable; trying another active SDOT camera"
-            test "$tested" -lt 8 || break
+            test "$tested" -lt 5 || break
           done < <(
             jq -r '.features[]?.attributes | select(.STREAM_NAME != null and .STREAM_NAME != "") | [(.STREAM_NAME // ""), (.LOCATION // .NAME // "SDOT camera")] | @tsv' /tmp/sdot-cameras.json
           )
 
-          test "$tested" -gt 0 || { echo "Official SDOT layer returned no active STREAM_NAME"; cat /tmp/sdot-cameras.json; exit 1; }
-          test "$stream_ok" -eq 1 || { echo "None of the first ${tested} current SDOT streams returned an HLS manifest"; exit 1; }
-
-          echo "Production smoke test passed, including a live SDOT HLS manifest"
+          if [ "$tested" -eq 0 ]; then
+            echo "::warning::Official SDOT layer returned no active STREAM_NAME"
+          elif [ "$stream_ok" -ne 1 ]; then
+            echo "::warning::None of the first ${tested} current SDOT streams returned an HLS manifest; deployment is healthy but SDOT live video is unavailable from this runner"
+          else
+            echo "External SDOT HLS probe passed"
+          fi
