@@ -1,13 +1,14 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "hoxel-traffic-camera-feed",
-  "main": "./worker/index.ts",
-  "compatibility_date": "2026-08-14",
+  "main": "./prototype/vanilla/worker.ts",
+  "compatibility_date": "2026-08-15",
   "compatibility_flags": [
     "nodejs_compat"
   ],
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "head_sampling_rate": 1
   },
   "routes": [
     {
@@ -16,8 +17,10 @@
     }
   ],
   "assets": {
-    "not_found_handling": "single-page-application",
+    "directory": "./prototype/vanilla/public",
+    "binding": "ASSETS",
     "run_worker_first": [
+      "/",
       "/api/*"
     ]
   }
