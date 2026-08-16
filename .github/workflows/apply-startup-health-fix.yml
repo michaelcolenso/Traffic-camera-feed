@@ -1,0 +1,51 @@
+name: Validate startup health fix
+
+on:
+  push:
+    branches:
+      - perf/remove-startup-health-work
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Remove successful-refresh writes from startup
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/App.tsx')
+          text = path.read_text()
+
+          text = text.replace("""  const loadMoreRef = useRef<HTMLDivElement>(null);\n  const pendingImageRefreshesRef = useRef<Record<string, number>>({});\n  const healthFlushTimerRef = useRef<number | null>(null);\n  const deferredQuery = useDeferredValue(searchQuery);""", """  const loadMoreRef = useRef<HTMLDivElement>(null);\n  const deferredQuery = useDeferredValue(searchQuery);""")
+
+          start = text.index("  const flushImageRefreshes = useCallback(() => {")
+          end = text.index("\n\n  function toggleCollection", start)
+          replacement = """  const trackSuccessfulRefreshes = activeCollections.includes('recent') || showDiagnostics;\n\n  const handleHealthChange = useCallback((camera: TrafficCamera, event: 'image-refresh' | 'image-error' | 'stream-error') => {\n    const id = getCameraId(camera);\n\n    if (event === 'image-refresh') {\n      if (!trackSuccessfulRefreshes) return;\n      setHealthByCamera((current) => ({\n        ...current,\n        [id]: {\n          ...current[id],\n          lastImageRefresh: Date.now(),\n          lastImageError: undefined,\n        },\n      }));\n      return;\n    }\n\n    setHealthByCamera((current) => ({\n      ...current,\n      [id]: {\n        ...current[id],\n        ...(event === 'image-error' ? { lastImageError: Date.now() } : {}),\n        ...(event === 'stream-error' ? { lastStreamError: Date.now() } : {}),\n      },\n    }));\n  }, [trackSuccessfulRefreshes]);"""
+          text = text[:start] + replacement + text[end:]
+
+          old_toggle = """  function toggleCollection(id: CollectionId) {\n    setActiveCollections((current) =>\n      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],\n    );\n  }"""
+          new_toggle = """  function toggleCollection(id: CollectionId) {\n    if (id === 'recent' && !activeCollections.includes('recent') && displayedCameras.length > 0) {\n      const refreshedAt = Date.now();\n      setHealthByCamera((current) => {\n        const next = { ...current };\n        for (const camera of displayedCameras) {\n          const cameraId = getCameraId(camera);\n          next[cameraId] = {\n            ...next[cameraId],\n            lastImageRefresh: refreshedAt,\n            lastImageError: undefined,\n          };\n        }\n        return next;\n      });\n    }\n\n    setActiveCollections((current) =>\n      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],\n    );\n  }"""
+          assert old_toggle in text
+          text = text.replace(old_toggle, new_toggle, 1)
+          path.write_text(text)
+          PY
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Commit validated changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-startup-health-fix.yml
+          git add src/App.tsx worker/index.ts
+          git commit -m "Remove successful camera health writes from startup"
+          git push
