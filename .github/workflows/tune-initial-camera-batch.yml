@@ -1,0 +1,40 @@
+name: Tune initial camera batch
+
+on:
+  push:
+    branches:
+      - perf/image-resize-budgets
+
+permissions:
+  contents: write
+
+jobs:
+  tune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Reduce initial camera mount batch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/App.tsx')
+          text = path.read_text()
+          text = text.replace('const INITIAL_CAMERA_COUNT = 24;\nconst CAMERA_PAGE_SIZE = 24;', 'const INITIAL_CAMERA_COUNT = 12;\nconst CAMERA_PAGE_SIZE = 12;')
+          path.write_text(text)
+          PY
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Commit validated batch tuning
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tune-initial-camera-batch.yml
+          git add src/App.tsx
+          git commit -m "Reduce initial camera mount batch"
+          git push
