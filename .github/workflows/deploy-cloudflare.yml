@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Validate, build, deploy, and smoke test
+    name: Validate, deploy, and smoke test
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -35,8 +35,10 @@ jobs:
       - name: TypeScript check
         run: npm run lint
 
-      - name: Build
-        run: npm run build
+      - name: Validate production Wrangler configuration
+        run: |
+          npx wrangler types worker-configuration.d.ts --config wrangler.jsonc
+          test -s worker-configuration.d.ts
 
       - name: Verify Cloudflare credentials
         env:
@@ -60,61 +62,64 @@ jobs:
 
           home_ok=0
           for attempt in {1..12}; do
-            if curl --fail --silent --show-error --max-time 10 https://cams.hoxel.dev/ -o /tmp/cams-home \
-              && grep -q '<div id="root"></div>' /tmp/cams-home; then
+            home_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-home -w '%{http_code}' https://cams.hoxel.dev/ || true)"
+            js_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-js -w '%{http_code}' https://cams.hoxel.dev/benchmark.js || true)"
+            api_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-cameras -w '%{http_code}' 'https://cams.hoxel.dev/api/cameras?source=arcgis' || true)"
+            echo "Production readiness ${attempt}/12: home=${home_status}, js=${js_status}, cameras=${api_status}"
+            if [ "$home_status" = "200" ] && [ "$js_status" = "200" ] && [ "$api_status" = "200" ] \
+              && grep -q 'Seattle Traffic Watch' /tmp/cams-home \
+              && grep -q 'window.__CAMERAS__=' /tmp/cams-home \
+              && grep -q 'data-collection="live"' /tmp/cams-home \
+              && jq -e 'type == "array" and length > 0' /tmp/cams-cameras >/dev/null; then
               home_ok=1
               break
             fi
-            echo "Home page not ready yet (attempt ${attempt}/12)"
             sleep 5
           done
-          test "$home_ok" -eq 1 || { echo "cams.hoxel.dev did not become healthy"; exit 1; }
+          test "$home_ok" -eq 1 || { echo "cams.hoxel.dev did not become healthy"; head -c 1000 /tmp/cams-home || true; exit 1; }
 
-          api_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-api -w '%{http_code}' https://cams.hoxel.dev/api/video)"
-          test "$api_status" = "400" || { echo "Expected /api/video without a URL to return 400, got ${api_status}"; cat /tmp/cams-api; exit 1; }
-          grep -q 'Invalid or missing video path' /tmp/cams-api || { echo "Unexpected /api/video response body"; cat /tmp/cams-api; exit 1; }
+          video_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-video -w '%{http_code}' https://cams.hoxel.dev/api/video)"
+          test "$video_status" = "400" || { echo "Expected /api/video without a URL to return 400, got ${video_status}"; cat /tmp/cams-video; exit 1; }
+          grep -q 'Invalid video path' /tmp/cams-video || { echo "Unexpected /api/video response body"; cat /tmp/cams-video; exit 1; }
 
           image_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-image -w '%{http_code}' https://cams.hoxel.dev/api/image)"
           test "$image_status" = "400" || { echo "Expected /api/image without a path to return 400, got ${image_status}"; cat /tmp/cams-image; exit 1; }
-          grep -q 'Invalid or missing camera image path' /tmp/cams-image || { echo "Unexpected /api/image response body"; cat /tmp/cams-image; exit 1; }
+          grep -q 'Bad image path' /tmp/cams-image || { echo "Unexpected /api/image response body"; cat /tmp/cams-image; exit 1; }
 
-          echo "Core production smoke test passed: app, video route, and image route are healthy"
+          first_image_path="$(jq -r '.[0].imagePath // empty' /tmp/cams-cameras)"
+          test -n "$first_image_path" || { echo "Camera payload did not include an imagePath"; exit 1; }
+          encoded_image_path="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$first_image_path")"
+          transformed_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-transformed -w '%{http_code}' "https://cams.hoxel.dev/api/image?path=${encoded_image_path}&w=480")"
+          test "$transformed_status" = "200" || { echo "Expected transformed camera image to return 200, got ${transformed_status}"; exit 1; }
 
-          # Live SDOT HLS is an external dependency. Probe it for visibility, but do not
-          # fail a healthy deployment when SDOT's streaming origin is unavailable.
-          arcgis_url='https://services.arcgis.com/ZOyb2t4B0UYuYNYH/ArcGIS/rest/services/Traffic_Cameras_CDL/FeatureServer/0/query?where=STREAM_NAME%20IS%20NOT%20NULL%20AND%20SERVSTAT%20%3C%3E%20%27INACT%27&outFields=NAME%2CLOCATION%2CSTREAM_NAME%2CSERVSTAT&returnGeometry=false&resultRecordCount=25&f=json'
-          if ! curl --fail --silent --show-error --max-time 15 "$arcgis_url" -o /tmp/sdot-cameras.json; then
-            echo "::warning::SDOT ArcGIS camera inventory is unavailable; skipping external HLS probe"
-            exit 0
-          fi
+          echo "Core production smoke test passed: edge-rendered app, camera data, video route, and image transform are healthy"
 
+          # Live HLS is an external dependency. Probe several current streams for visibility,
+          # but do not fail a healthy deployment when Seattle's streaming origin is unavailable.
           stream_ok=0
           tested=0
-          while IFS=$'\t' read -r stream_name camera_name; do
-            test -n "$stream_name" || continue
+          while IFS=$'\t' read -r video_url camera_name; do
+            test -n "$video_url" || continue
+            case "$video_url" in
+              /api/video*) ;;
+              *) continue ;;
+            esac
             tested=$((tested + 1))
-            stream_path="/live/${stream_name}.stream/playlist.m3u8"
-            encoded_path="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$stream_path")"
-            stream_url="https://cams.hoxel.dev/api/video?url=${encoded_path}"
-            echo "Testing SDOT HLS camera ${tested}: ${camera_name:-SDOT camera} (${stream_name})"
-
+            stream_url="https://cams.hoxel.dev${video_url}"
+            echo "Testing HLS camera ${tested}: ${camera_name:-Seattle camera}"
             if curl --fail --silent --show-error --max-time 6 "$stream_url" -o /tmp/sdot-playlist.m3u8 \
               && grep -q '^#EXTM3U' /tmp/sdot-playlist.m3u8; then
               stream_ok=1
-              echo "Working SDOT HLS stream found: ${stream_name}"
+              echo "Working HLS stream found"
               break
             fi
-
-            echo "Stream ${stream_name} unavailable; trying another active SDOT camera"
             test "$tested" -lt 5 || break
-          done < <(
-            jq -r '.features[]?.attributes | select(.STREAM_NAME != null and .STREAM_NAME != "") | [(.STREAM_NAME // ""), (.LOCATION // .NAME // "SDOT camera")] | @tsv' /tmp/sdot-cameras.json
-          )
+          done < <(jq -r '.[] | select(.videoUrl != null and .videoUrl != "") | [(.videoUrl // ""), (.label // "Seattle camera")] | @tsv' /tmp/cams-cameras)
 
           if [ "$tested" -eq 0 ]; then
-            echo "::warning::Official SDOT layer returned no active STREAM_NAME"
+            echo "::warning::Current camera feed returned no live streams to probe"
           elif [ "$stream_ok" -ne 1 ]; then
-            echo "::warning::None of the first ${tested} current SDOT streams returned an HLS manifest; deployment is healthy but SDOT live video is unavailable from this runner"
+            echo "::warning::None of the first ${tested} current streams returned an HLS manifest; deployment is healthy but external live video is unavailable from this runner"
           else
-            echo "External SDOT HLS probe passed"
+            echo "External HLS probe passed"
           fi
