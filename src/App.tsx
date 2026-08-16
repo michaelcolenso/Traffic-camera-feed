@@ -131,6 +131,16 @@ export default function App() {
     setArcgisUrlError('');
   }
 
+  function openSourceSettings() {
+    setShowSettings(true);
+    window.requestAnimationFrame(() => {
+      window.scrollTo({
+        top: 0,
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      });
+    });
+  }
+
   useEffect(() => {
     if (!cameras?.length || focusedCamera || hasHydratedUrlCamera) return;
     const params = new URLSearchParams(window.location.search);
@@ -166,7 +176,7 @@ export default function App() {
                   </div>
                   <button
                     onClick={() => setShowSettings((s) => !s)}
-                    className={`rounded-xl border p-2 transition ${showSettings ? 'border-cyan-300/55 bg-cyan-400/10 text-cyan-200 shadow-[0_0_12px_rgba(41,216,255,0.25)]' : 'border-slate-400/20 bg-slate-900/70 text-slate-400 hover:text-slate-200'}`}
+                    className={`flex h-11 w-11 items-center justify-center rounded-xl border transition ${showSettings ? 'border-cyan-300/55 bg-cyan-400/10 text-cyan-200 shadow-[0_0_12px_rgba(41,216,255,0.25)]' : 'border-slate-400/20 bg-slate-900/70 text-slate-400 hover:text-slate-200'}`}
                     title="Data source settings"
                     aria-label="Toggle data source settings"
                   >
@@ -174,15 +184,16 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <div className="rounded-2xl border border-cyan-300/25 bg-slate-950/45 px-3 py-2">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-slate-300">Cameras</p>
-                    <p className="mt-1 text-lg font-semibold text-cyan-200">{cameras?.length ?? '--'}</p>
-                  </div>
-                  <div className="rounded-2xl border border-cyan-300/25 bg-slate-950/45 px-3 py-2">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-slate-300">Live streams</p>
-                    <p className="mt-1 text-lg font-semibold text-cyan-200">{withVideo}</p>
-                  </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-200">
+                  <span className="rounded-full border border-cyan-300/25 bg-slate-950/45 px-2.5 py-1.5">
+                    <strong className="text-cyan-200">{cameras?.length ?? '--'}</strong> cameras
+                  </span>
+                  <span className="rounded-full border border-cyan-300/25 bg-slate-950/45 px-2.5 py-1.5">
+                    <strong className="text-cyan-200">{withVideo}</strong> live
+                  </span>
+                  <span className="rounded-full border border-slate-300/15 bg-slate-950/35 px-2.5 py-1.5 text-slate-300">
+                    {source === 'arcgis' ? 'ArcGIS' : 'SDOT'} source
+                  </span>
                 </div>
 
                 <div className="mt-3 flex items-center gap-2 rounded-2xl border border-slate-400/20 bg-slate-950/55 p-2">
@@ -474,7 +485,7 @@ export default function App() {
         ) : view === 'map' ? (
           <MapView cameras={filteredCameras} healthByCamera={healthByCamera} onFocus={setFocusedCamera} />
         ) : (
-          <main className="mx-auto max-w-7xl px-4 pb-24 pt-6 md:py-8">
+          <main className="mx-auto max-w-7xl px-3 pb-28 pt-4 sm:px-4 sm:pt-6 md:py-8">
             <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-400/15 bg-slate-900/55 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
                 Visible cameras
@@ -519,7 +530,7 @@ export default function App() {
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
                 {filteredCameras?.map((camera) => (
                   <CameraCard key={camera.imageurl.url} camera={camera} searchQuery={deferredQuery} onFocus={setFocusedCamera} onHealthChange={handleHealthChange} />
                 ))}
@@ -537,28 +548,30 @@ export default function App() {
           />
         )}
 
-        <nav className="mobile-command-dock fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-1.5rem)] max-w-sm -translate-x-1/2 items-center gap-2 rounded-2xl border border-cyan-200/20 bg-slate-950/85 p-2 shadow-[0_18px_35px_rgba(2,8,20,0.7)] backdrop-blur-xl md:hidden">
+        <nav className="mobile-command-dock fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-40 flex w-[calc(100%-1.5rem)] max-w-sm -translate-x-1/2 items-center gap-2 rounded-2xl border border-cyan-200/20 bg-slate-950/90 p-2 shadow-[0_18px_35px_rgba(2,8,20,0.7)] backdrop-blur-xl md:hidden" aria-label="Primary navigation">
           <button
             onClick={() => setView('grid')}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs ${view === 'grid' ? 'bg-cyan-400/15 text-cyan-100' : 'text-slate-400'}`}
+            className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs ${view === 'grid' ? 'bg-cyan-400/15 text-cyan-100' : 'text-slate-300'}`}
+            aria-pressed={view === 'grid'}
           >
-            <LayoutGrid className="h-3.5 w-3.5" />
+            <LayoutGrid className="h-4 w-4" />
             Grid
           </button>
           <button
             onClick={() => setView('map')}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs ${view === 'map' ? 'bg-cyan-400/15 text-cyan-100' : 'text-slate-400'}`}
+            className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs ${view === 'map' ? 'bg-cyan-400/15 text-cyan-100' : 'text-slate-300'}`}
+            aria-pressed={view === 'map'}
           >
-            <Map className="h-3.5 w-3.5" />
+            <Map className="h-4 w-4" />
             Map
           </button>
           <button
-            onClick={() => setSource((current) => (current === 'arcgis' ? 'sdot' : 'arcgis'))}
-            className="flex min-w-20 items-center justify-center gap-1.5 rounded-xl border border-slate-400/25 px-3 py-2 text-[11px] text-slate-200"
-            aria-label={`Switch data source from ${source === 'arcgis' ? 'ArcGIS' : 'SDOT Socrata'}`}
+            onClick={openSourceSettings}
+            className="flex min-h-11 min-w-24 items-center justify-center gap-1.5 rounded-xl border border-slate-400/25 px-3 py-2 text-[11px] text-slate-200"
+            aria-label={`Open data source settings. Current source: ${source === 'arcgis' ? 'ArcGIS' : 'SDOT Socrata'}`}
           >
-            {source === 'arcgis' ? <Satellite className="h-3.5 w-3.5" /> : <Radio className="h-3.5 w-3.5" />}
-            Source
+            {source === 'arcgis' ? <Satellite className="h-4 w-4" /> : <Radio className="h-4 w-4" />}
+            {source === 'arcgis' ? 'ArcGIS' : 'SDOT'}
           </button>
         </nav>
       </div>
