@@ -1,7 +1,9 @@
+import fs from 'node:fs';
 import { chromium } from 'playwright';
 
 const base = process.env.VANILLA_URL;
 if (!base) throw new Error('VANILLA_URL is required');
+fs.mkdirSync('test-artifacts', { recursive: true });
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
@@ -12,6 +14,7 @@ try {
   await page.goto(base, { waitUntil: 'networkidle' });
   check(await page.locator('.camera-card').count() >= 6, 'initial camera cards missing');
   check(await page.locator('#collections [data-collection]').count() === 7, 'camera collections missing');
+  await page.screenshot({ path: 'test-artifacts/mobile-grid.png', fullPage: true });
 
   await page.locator('#search').fill('bridge');
   await page.waitForTimeout(150);
@@ -25,6 +28,7 @@ try {
   await page.locator('.camera-open').first().click();
   check(await page.locator('#modal[open]').count() === 1, 'focus modal did not open');
   const firstFocused = new URL(page.url()).searchParams.get('camera');
+  await page.screenshot({ path: 'test-artifacts/mobile-focus.png', fullPage: true });
   await page.locator('#modal [data-focus]').filter({ hasText: 'Next' }).click();
   const nextFocused = new URL(page.url()).searchParams.get('camera');
   check(await page.locator('#modal[open]').count() === 1, 'focus modal closed during next-camera navigation');
@@ -34,6 +38,8 @@ try {
   await page.locator('#map-view').click();
   check(new URL(page.url()).searchParams.get('view') === 'map', 'map URL state missing');
   check(await page.locator('#map').isVisible(), 'map shell missing');
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: 'test-artifacts/mobile-map.png', fullPage: true });
   await page.locator('#grid-view').click();
 
   await page.locator('#settings-toggle').click();
@@ -70,6 +76,11 @@ try {
   await page.unroute('**/api/cameras?source=sdot**');
   const realSdot = await page.request.get(`${base}/api/cameras?source=sdot`);
   check([200, 503].includes(realSdot.status()), `unexpected SDOT route status ${realSdot.status()}`);
+
+  const desktop = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  await desktop.goto(base, { waitUntil: 'networkidle' });
+  await desktop.screenshot({ path: 'test-artifacts/desktop-grid.png', fullPage: true });
+  await desktop.close();
 } finally {
   await browser.close();
 }
