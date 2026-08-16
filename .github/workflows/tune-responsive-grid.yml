@@ -1,0 +1,51 @@
+name: Validate responsive grid window
+
+on:
+  push:
+    branches:
+      - perf/responsive-grid-window
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Make initial camera window responsive
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/App.tsx')
+          text = path.read_text()
+          text = text.replace(
+              "const INITIAL_CAMERA_COUNT = 6;\nconst CAMERA_PAGE_SIZE = 6;",
+              "const MOBILE_INITIAL_CAMERA_COUNT = 6;\nconst DESKTOP_INITIAL_CAMERA_COUNT = 16;\nconst CAMERA_PAGE_SIZE = 6;\n\nfunction getInitialCameraCount(): number {\n  return window.matchMedia('(min-width: 768px)').matches ? DESKTOP_INITIAL_CAMERA_COUNT : MOBILE_INITIAL_CAMERA_COUNT;\n}",
+          )
+          text = text.replace(
+              "const [visibleCameraCount, setVisibleCameraCount] = useState(INITIAL_CAMERA_COUNT);",
+              "const [visibleCameraCount, setVisibleCameraCount] = useState(getInitialCameraCount);",
+          )
+          text = text.replace(
+              "setVisibleCameraCount(INITIAL_CAMERA_COUNT);",
+              "setVisibleCameraCount(getInitialCameraCount());",
+          )
+          path.write_text(text)
+          PY
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Commit validated change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tune-responsive-grid.yml
+          git add src/App.tsx
+          git commit -m "Use responsive initial camera window"
+          git push
