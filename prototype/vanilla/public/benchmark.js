@@ -101,8 +101,8 @@ function bindImageHealth(root = grid) {
     img.dataset.healthBound = '1';
     const camera = cameraById(img.closest('.camera-card')?.dataset.cameraId);
     if (!camera) return;
-    img.addEventListener('load', () => noteHealth(camera,'refresh'), {once:true});
-    img.addEventListener('error', () => noteHealth(camera,'image-error'), {once:true});
+    img.addEventListener('load', () => noteHealth(camera,'refresh'));
+    img.addEventListener('error', () => noteHealth(camera,'image-error'));
   });
 }
 function renderGrid(reset = false) {
@@ -244,7 +244,7 @@ function openFocus(id) {
   const set=filtered.length?filtered:cameras;const index=set.findIndex((c)=>c.id===id);const prev=set[(index-1+set.length)%set.length];const next=set[(index+1)%set.length];
   const nearby=nearest(camera).map((c)=>`<button class="nearby-camera" data-focus="${escapeHtml(c.id)}">${escapeHtml(c.label)}</button>`).join('');
   modalBody.innerHTML=`<div class="focus-head"><p class="eyebrow">Camera focus</p><h2>${escapeHtml(camera.label)}</h2></div><div class="focus-media">${camera.videoUrl?`<video id="focus-video" controls playsinline poster="${imageUrl(camera,960,true)}"></video>`:`<img src="${imageUrl(camera,960,true)}" alt="${escapeHtml(camera.label)}" width="960" height="540">`}</div><div class="focus-actions"><button class="chip" data-focus="${escapeHtml(prev?.id||id)}">← Previous</button><button id="refresh-focus" class="chip">Refresh snapshot</button><button class="chip" data-focus="${escapeHtml(next?.id||id)}">Next →</button>${camera.webUrl?`<a class="chip" href="${escapeHtml(camera.webUrl)}" target="_blank" rel="noopener noreferrer">SDOT page</a>`:''}</div>${nearby?`<div class="nearby"><p>Nearby cameras</p>${nearby}</div>`:''}`;
-  modal.showModal();
+  if (!modal.open) modal.showModal();
   $('#refresh-focus')?.addEventListener('click',()=>{const media=$('#focus-video')||modalBody.querySelector('img');if(media){if(media.tagName==='IMG')media.src=imageUrl(camera,960,true);else media.poster=imageUrl(camera,960,true);}});
   if (camera.videoUrl) setupVideo(camera);
 }
@@ -254,16 +254,16 @@ grid.addEventListener('click',(event)=>{const button=event.target.closest('.came
 modalBody.addEventListener('click',(event)=>{const button=event.target.closest('[data-focus]');if(button)openFocus(button.dataset.focus);});
 close.addEventListener('click',closeFocus);modal.addEventListener('click',(event)=>{if(event.target===modal)closeFocus();});modal.addEventListener('close',()=>{destroyVideo();focusedId=null;updateUrl();});
 search.addEventListener('input',refilter);
-collectionsEl.addEventListener('click',(event)=>{const button=event.target.closest('button');if(!button)return;if(button.dataset.clearCollections!==undefined)activeCollections=[];else if(button.dataset.collection){const id=button.dataset.collection;activeCollections=activeCollections.includes(id)?activeCollections.filter((x)=>x!==id):[...activeCollections,id];if(id==='recent'&&activeCollections.includes(id))filtered.slice(0,visible).forEach((c)=>noteHealth(c,'refresh'));}refilter();});
+collectionsEl.addEventListener('click',(event)=>{const button=event.target.closest('button');if(!button)return;if(button.dataset.clearCollections!==undefined)activeCollections=[];else if(button.dataset.collection){const id=button.dataset.collection;activeCollections=activeCollections.includes(id)?activeCollections.filter((x)=>x!==id):[...activeCollections,id];}refilter();});
 $('#match-all').addEventListener('click',()=>{collectionMode='all';$('#match-all').classList.add('active');$('#match-any').classList.remove('active');refilter();});
 $('#match-any').addEventListener('click',()=>{collectionMode='any';$('#match-any').classList.add('active');$('#match-all').classList.remove('active');refilter();});
 $('#grid-view').addEventListener('click',()=>setView('grid'));$('#map-view').addEventListener('click',()=>setView('map'));document.querySelectorAll('[data-mobile-view]').forEach((b)=>b.addEventListener('click',()=>setView(b.dataset.mobileView)));
 $('#settings-toggle').addEventListener('click',()=>{settings.hidden=!settings.hidden;$('#settings-toggle').setAttribute('aria-expanded',String(!settings.hidden));});
-$('#mobile-settings').addEventListener('click',()=>{settings.hidden=false;scrollTo({top:0,behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth'});});
+$('#mobile-settings').addEventListener('click',()=>{settings.hidden=false;$('#settings-toggle').setAttribute('aria-expanded','true');scrollTo({top:0,behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth'});});
 $('#source-arcgis').addEventListener('click',()=>{source='arcgis';$('#source-arcgis').classList.add('active');$('#source-sdot').classList.remove('active');});
 $('#source-sdot').addEventListener('click',()=>{source='sdot';$('#source-sdot').classList.add('active');$('#source-arcgis').classList.remove('active');});
 $('#restore-source').addEventListener('click',()=>{$('#arcgis-url').value=DEFAULT_ARCGIS;featureService=DEFAULT_ARCGIS;sourceError.textContent='';});
-$('#apply-source').addEventListener('click',async()=>{featureService=$('#arcgis-url').value.trim()||DEFAULT_ARCGIS;await loadCameras(true);if(!sourceError.textContent)settings.hidden=true;});
+$('#apply-source').addEventListener('click',async()=>{featureService=$('#arcgis-url').value.trim()||DEFAULT_ARCGIS;await loadCameras(true);if(!sourceError.textContent){settings.hidden=true;$('#settings-toggle').setAttribute('aria-expanded','false');}});
 $('#diagnostics-toggle').addEventListener('click',()=>{diagnostics.hidden=!diagnostics.hidden;if(!diagnostics.hidden)renderDiagnostics();});
 new IntersectionObserver(([entry])=>{if(entry.isIntersecting&&view==='grid'&&visible<filtered.length){visible+=6;renderGrid();}}, {rootMargin:'300px 0px'}).observe(sentinel);
 
