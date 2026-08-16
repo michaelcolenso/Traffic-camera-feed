@@ -64,8 +64,6 @@ export default function App() {
   const [lastSuccessfulSync, setLastSuccessfulSync] = useState<number | null>(null);
   const [visibleCameraCount, setVisibleCameraCount] = useState(INITIAL_CAMERA_COUNT);
   const loadMoreRef = useRef<HTMLDivElement>(null);
-  const pendingImageRefreshesRef = useRef<Record<string, number>>({});
-  const healthFlushTimerRef = useRef<number | null>(null);
   const deferredQuery = useDeferredValue(searchQuery);
 
   const swrKey = `cameras-${source}-${arcgisUrl}`;
@@ -109,34 +107,21 @@ export default function App() {
   const withVideo = cameras?.filter((c) => c.video_url?.url).length ?? 0;
   const issueCount = (Object.values(healthByCamera) as CameraHealth[]).filter((health) => health.lastImageError || health.lastStreamError).length;
 
-  const flushImageRefreshes = useCallback(() => {
-    const pending = pendingImageRefreshesRef.current;
-    pendingImageRefreshesRef.current = {};
-    healthFlushTimerRef.current = null;
-    const entries = Object.entries(pending);
-    if (entries.length === 0) return;
-
-    setHealthByCamera((current) => {
-      const next = { ...current };
-      for (const [id, refreshedAt] of entries) {
-        next[id] = {
-          ...next[id],
-          lastImageRefresh: refreshedAt,
-          lastImageError: undefined,
-        };
-      }
-      return next;
-    });
-  }, []);
+  const trackSuccessfulRefreshes = activeCollections.includes('recent') || showDiagnostics;
 
   const handleHealthChange = useCallback((camera: TrafficCamera, event: 'image-refresh' | 'image-error' | 'stream-error') => {
     const id = getCameraId(camera);
 
     if (event === 'image-refresh') {
-      pendingImageRefreshesRef.current[id] = Date.now();
-      if (healthFlushTimerRef.current === null) {
-        healthFlushTimerRef.current = window.setTimeout(flushImageRefreshes, 1_500);
-      }
+      if (!trackSuccessfulRefreshes) return;
+      setHealthByCamera((current) => ({
+        ...current,
+        [id]: {
+          ...current[id],
+          lastImageRefresh: Date.now(),
+          lastImageError: undefined,
+        },
+      }));
       return;
     }
 
@@ -148,15 +133,25 @@ export default function App() {
         ...(event === 'stream-error' ? { lastStreamError: Date.now() } : {}),
       },
     }));
-  }, [flushImageRefreshes]);
-
-  useEffect(() => () => {
-    if (healthFlushTimerRef.current !== null) {
-      window.clearTimeout(healthFlushTimerRef.current);
-    }
-  }, []);
+  }, [trackSuccessfulRefreshes]);
 
   function toggleCollection(id: CollectionId) {
+    if (id === 'recent' && !activeCollections.includes('recent') && displayedCameras.length > 0) {
+      const refreshedAt = Date.now();
+      setHealthByCamera((current) => {
+        const next = { ...current };
+        for (const camera of displayedCameras) {
+          const cameraId = getCameraId(camera);
+          next[cameraId] = {
+            ...next[cameraId],
+            lastImageRefresh: refreshedAt,
+            lastImageError: undefined,
+          };
+        }
+        return next;
+      });
+    }
+
     setActiveCollections((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
     );

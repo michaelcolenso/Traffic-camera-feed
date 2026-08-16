@@ -83,9 +83,9 @@ async function handleImageRequest(request: Request, requestUrl: URL): Promise<Re
     redirect: 'follow',
     cf: {
       image: {
-        width: 800,
+        width: 480,
         fit: 'scale-down',
-        quality: 72,
+        quality: 70,
         ...(format ? { format } : {}),
       },
       cacheEverything: true,
