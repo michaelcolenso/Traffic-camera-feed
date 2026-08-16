@@ -25,10 +25,15 @@ jobs:
           cache: npm
       - run: npm ci
 
-      - name: Validate Wrangler configuration and generate bindings types
+      - name: Existing TypeScript regression check
+        run: npm run lint
+
+      - name: Validate prototype and production Wrangler configurations
         run: |
           npx wrangler types prototype/vanilla/worker-configuration.d.ts --config prototype/vanilla/wrangler.jsonc
           test -s prototype/vanilla/worker-configuration.d.ts
+          npx wrangler types worker-configuration.d.ts --config wrangler.jsonc
+          test -s worker-configuration.d.ts
 
       - name: Deploy isolated vanilla Worker
         env:
@@ -56,6 +61,7 @@ jobs:
             if [ "$home_status" = 200 ] && [ "$js_status" = 200 ] && [ "$api_status" = 200 ] \
               && grep -q 'Seattle Traffic Watch' /tmp/vanilla.html \
               && grep -q 'window.__CAMERAS__=' /tmp/vanilla.html \
+              && grep -q 'data-collection="live"' /tmp/vanilla.html \
               && grep -q 'map-view' /tmp/vanilla.html; then
               ready=1
               break
