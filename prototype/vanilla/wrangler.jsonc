@@ -2,10 +2,14 @@
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "hoxel-traffic-camera-vanilla-benchmark",
   "main": "./worker.ts",
-  "compatibility_date": "2026-08-14",
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": true,
-  "observability": { "enabled": true },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
