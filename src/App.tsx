@@ -26,8 +26,8 @@ type ViewMode = 'grid' | 'map';
 type DataSource = 'sdot' | 'arcgis';
 type CollectionMode = 'all' | 'any';
 
-const INITIAL_CAMERA_COUNT = 12;
-const CAMERA_PAGE_SIZE = 12;
+const INITIAL_CAMERA_COUNT = 6;
+const CAMERA_PAGE_SIZE = 6;
 
 function makeFetcher(source: DataSource, arcgisUrl: string) {
   return (_key: string): Promise<TrafficCamera[]> =>
@@ -97,7 +97,7 @@ export default function App() {
           setVisibleCameraCount((current) => Math.min(current + CAMERA_PAGE_SIZE, filteredCameras.length));
         }
       },
-      { rootMargin: '1000px 0px' },
+      { rootMargin: '300px 0px' },
     );
 
     observer.observe(target);
