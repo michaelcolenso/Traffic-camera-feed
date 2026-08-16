@@ -1,0 +1,98 @@
+name: Production performance audit
+
+on:
+  workflow_run:
+    workflows:
+      - Deploy to Cloudflare
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lighthouse:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Wait for production
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error --max-time 10 https://cams.hoxel.dev/ >/dev/null; then
+              exit 0
+            fi
+            echo "Production not ready yet (${attempt}/12)"
+            sleep 5
+          done
+          exit 1
+
+      - name: Run mobile Lighthouse
+        run: |
+          npx --yes lighthouse@latest https://cams.hoxel.dev/ \
+            --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" \
+            --output=json \
+            --output-path=./lighthouse-mobile.json \
+            --quiet
+
+      - name: Run desktop Lighthouse
+        run: |
+          npx --yes lighthouse@latest https://cams.hoxel.dev/ \
+            --preset=desktop \
+            --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" \
+            --output=json \
+            --output-path=./lighthouse-desktop.json \
+            --quiet
+
+      - name: Publish metrics summary
+        shell: python
+        run: |
+          import json
+          import os
+
+          rows = []
+          for label, filename in [('Mobile', 'lighthouse-mobile.json'), ('Desktop', 'lighthouse-desktop.json')]:
+              with open(filename) as f:
+                  report = json.load(f)
+              audits = report['audits']
+              categories = report['categories']
+              rows.append({
+                  'device': label,
+                  'performance': round(categories['performance']['score'] * 100),
+                  'accessibility': round(categories['accessibility']['score'] * 100),
+                  'fcp': audits['first-contentful-paint']['displayValue'],
+                  'lcp': audits['largest-contentful-paint']['displayValue'],
+                  'tbt': audits['total-blocking-time']['displayValue'],
+                  'cls': audits['cumulative-layout-shift']['displayValue'],
+                  'speed_index': audits['speed-index']['displayValue'],
+              })
+
+          print(json.dumps(rows, indent=2))
+          summary = os.environ['GITHUB_STEP_SUMMARY']
+          with open(summary, 'a') as f:
+              f.write('## cams.hoxel.dev Lighthouse\n\n')
+              f.write('| Device | Performance | Accessibility | FCP | LCP | TBT | CLS | Speed Index |\n')
+              f.write('|---|---:|---:|---:|---:|---:|---:|---:|---:|\n')
+              for row in rows:
+                  f.write(f"| {row['device']} | {row['performance']} | {row['accessibility']} | {row['fcp']} | {row['lcp']} | {row['tbt']} | {row['cls']} | {row['speed_index']} |\n")
+
+      - name: Upload Lighthouse reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-production
+          path: |
+            lighthouse-mobile.json
+            lighthouse-desktop.json
+          retention-days: 14
