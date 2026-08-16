@@ -38,10 +38,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --max-time 15 "$VANILLA_URL/" -o /tmp/vanilla.html
-          grep -q 'Cloudflare edge prototype' /tmp/vanilla.html
-          grep -q 'window.__CAMERAS__=' /tmp/vanilla.html
-          curl --fail --silent --show-error --max-time 15 "$VANILLA_URL/benchmark.js" >/dev/null
+          ready=0
+          for attempt in {1..12}; do
+            home_status="$(curl --silent --show-error --max-time 15 -o /tmp/vanilla.html -w '%{http_code}' "$VANILLA_URL/" || true)"
+            js_status="$(curl --silent --show-error --max-time 15 -o /tmp/vanilla.js -w '%{http_code}' "$VANILLA_URL/benchmark.js" || true)"
+            echo "Preview readiness ${attempt}/12: home=${home_status}, js=${js_status}"
+            if [ "$home_status" = 200 ] && [ "$js_status" = 200 ] \
+              && grep -q 'Cloudflare edge prototype' /tmp/vanilla.html \
+              && grep -q 'window.__CAMERAS__=' /tmp/vanilla.html; then
+              ready=1
+              break
+            fi
+            sleep 3
+          done
+          test "$ready" -eq 1 || { echo 'Vanilla preview did not become healthy'; head -c 500 /tmp/vanilla.html || true; exit 1; }
 
       - name: Benchmark React production and vanilla prototype
         shell: bash
