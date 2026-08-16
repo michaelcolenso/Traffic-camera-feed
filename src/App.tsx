@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import {
   Search,
@@ -25,6 +25,9 @@ import { TrafficCamera } from './types';
 type ViewMode = 'grid' | 'map';
 type DataSource = 'sdot' | 'arcgis';
 type CollectionMode = 'all' | 'any';
+
+const INITIAL_CAMERA_COUNT = 24;
+const CAMERA_PAGE_SIZE = 24;
 
 function makeFetcher(source: DataSource, arcgisUrl: string) {
   return (_key: string): Promise<TrafficCamera[]> =>
@@ -59,6 +62,8 @@ export default function App() {
   const [healthByCamera, setHealthByCamera] = useState<Record<string, CameraHealth>>({});
   const [hasHydratedUrlCamera, setHasHydratedUrlCamera] = useState(false);
   const [lastSuccessfulSync, setLastSuccessfulSync] = useState<number | null>(null);
+  const [visibleCameraCount, setVisibleCameraCount] = useState(INITIAL_CAMERA_COUNT);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
   const deferredQuery = useDeferredValue(searchQuery);
 
   const swrKey = `cameras-${source}-${arcgisUrl}`;
@@ -72,6 +77,32 @@ export default function App() {
     () => filterCameras(cameras ?? [], deferredQuery, activeCollections, healthByCamera, collectionMode),
     [activeCollections, cameras, collectionMode, deferredQuery, healthByCamera],
   );
+
+  const displayedCameras = useMemo(
+    () => filteredCameras.slice(0, visibleCameraCount),
+    [filteredCameras, visibleCameraCount],
+  );
+
+  useEffect(() => {
+    setVisibleCameraCount(INITIAL_CAMERA_COUNT);
+  }, [activeCollections, collectionMode, deferredQuery, source]);
+
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target || visibleCameraCount >= filteredCameras.length) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisibleCameraCount((current) => Math.min(current + CAMERA_PAGE_SIZE, filteredCameras.length));
+        }
+      },
+      { rootMargin: '1000px 0px' },
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [filteredCameras.length, visibleCameraCount]);
 
   const withVideo = cameras?.filter((c) => c.video_url?.url).length ?? 0;
   const issueCount = (Object.values(healthByCamera) as CameraHealth[]).filter((health) => health.lastImageError || health.lastStreamError).length;
@@ -530,11 +561,27 @@ export default function App() {
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
-                {filteredCameras?.map((camera) => (
-                  <CameraCard key={camera.imageurl.url} camera={camera} searchQuery={deferredQuery} onFocus={setFocusedCamera} onHealthChange={handleHealthChange} />
-                ))}
-              </div>
+              <>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
+                  {displayedCameras.map((camera, index) => (
+                    <CameraCard
+                      key={camera.imageurl.url}
+                      camera={camera}
+                      searchQuery={deferredQuery}
+                      priority={index === 0}
+                      onFocus={setFocusedCamera}
+                      onHealthChange={handleHealthChange}
+                    />
+                  ))}
+                </div>
+                {displayedCameras.length < filteredCameras.length && (
+                  <div ref={loadMoreRef} className="flex min-h-24 items-center justify-center py-6" aria-live="polite">
+                    <span className="rounded-full border border-slate-300/15 bg-slate-900/60 px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-slate-300">
+                      Loading more cameras · {displayedCameras.length} of {filteredCameras.length}
+                    </span>
+                  </div>
+                )}
+              </>
             )}
           </main>
         )}

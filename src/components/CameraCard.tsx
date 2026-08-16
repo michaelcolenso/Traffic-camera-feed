@@ -7,11 +7,12 @@ interface CameraCardProps {
   camera: TrafficCamera;
   searchQuery?: string;
   refreshInterval?: number;
+  priority?: boolean;
   onFocus?: (camera: TrafficCamera) => void;
   onHealthChange?: (camera: TrafficCamera, event: 'image-refresh' | 'image-error' | 'stream-error') => void;
 }
 
-export const CameraCard: React.FC<CameraCardProps> = ({ camera, searchQuery = '', refreshInterval = 30_000, onFocus, onHealthChange }) => {
+export const CameraCard: React.FC<CameraCardProps> = ({ camera, searchQuery = '', refreshInterval = 30_000, priority = false, onFocus, onHealthChange }) => {
   const cardRef = useRef<HTMLElement>(null);
   const [isInView, setIsInView] = useState(false);
   const [isPageVisible, setIsPageVisible] = useState(() => document.visibilityState === 'visible');
@@ -86,12 +87,12 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, searchQuery = ''
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-cyan-300/35 bg-cyan-400/10 text-cyan-200">
             <MapPin className="h-3.5 w-3.5" />
           </span>
-          <h3
+          <h2
             className="truncate text-xs font-medium tracking-[0.04em] text-slate-100"
             title={camera.cameralabel}
           >
             {highlightedLabel}
-          </h3>
+          </h2>
         </div>
         <div className="ml-2 flex shrink-0 items-center gap-1.5">
           {isImgLoading && !isVideoPlaying && isInView && (
@@ -156,9 +157,9 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, searchQuery = ''
               setHasImgError(true);
               onHealthChange?.(camera, 'image-error');
             }}
-            loading="lazy"
+            loading={priority ? 'eager' : 'lazy'}
             decoding="async"
-            fetchPriority="low"
+            fetchPriority={priority ? 'high' : 'low'}
           />
         )}
 
@@ -168,7 +169,7 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera, searchQuery = ''
           <button
             onClick={() => onFocus?.(camera)}
             className="min-h-10 rounded-lg border border-cyan-300/35 bg-slate-950/80 px-3 py-2 text-xs font-medium text-cyan-100 backdrop-blur transition hover:bg-cyan-500/15 sm:min-h-0 sm:px-2 sm:py-1 sm:text-[11px]"
-            aria-label={`Open focus mode for ${camera.cameralabel}`}
+            aria-label={`View camera ${camera.cameralabel}`}
           >
             View camera
           </button>
