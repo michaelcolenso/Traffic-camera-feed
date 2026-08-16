@@ -1,0 +1,32 @@
+name: Apply mobile product pass
+
+on:
+  push:
+    branches:
+      - perf/grid-network-mobile
+
+permissions:
+  contents: write
+
+jobs:
+  update-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: python scripts/apply-mobile-product-pass.py
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Commit validated product pass
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-mobile-product-pass.yml scripts/apply-mobile-product-pass.py
+          git add src/App.tsx
+          git commit -m "Polish mobile navigation and camera grid"
+          git push
