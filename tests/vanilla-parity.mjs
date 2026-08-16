@@ -34,16 +34,35 @@ try {
   await page.locator('#settings-toggle').click();
   check(await page.locator('#settings').isVisible(), 'source settings missing');
 
-  const api = await page.request.get(`${base}/api/cameras?source=sdot`);
-  check(api.ok(), 'SDOT fallback endpoint failed');
-
   const bootstrap = await page.evaluate(() => window.__CAMERAS__ || []);
+  check(bootstrap.length > 0, 'bootstrap camera data missing');
+
+  // Verify the source switch behavior without making functional parity depend on
+  // Seattle's live Socrata availability from the GitHub-hosted runner.
+  await page.route('**/api/cameras?source=sdot**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(bootstrap.slice(0, Math.max(6, Math.min(bootstrap.length, 12)))),
+    });
+  });
+  await page.locator('#source-sdot').click();
+  await page.locator('#apply-source').click();
+  await page.waitForTimeout(100);
+  check((await page.locator('#status-line').textContent())?.includes('SDOT Socrata'), 'SDOT source switch did not update the app');
+
   if (bootstrap[0]?.imagePath) {
     const image = await page.request.get(`${base}/api/image?path=${encodeURIComponent(bootstrap[0].imagePath)}&w=480`);
     check(image.status() !== 400, 'image proxy rejected a bootstrap camera path');
   } else {
     failures.push('bootstrap camera image path missing');
   }
+
+  // The real endpoint must exist and return either current data or the explicit
+  // upstream-unavailable response; a missing/broken route is still a failure.
+  await page.unroute('**/api/cameras?source=sdot**');
+  const realSdot = await page.request.get(`${base}/api/cameras?source=sdot`);
+  check([200, 503].includes(realSdot.status()), `unexpected SDOT route status ${realSdot.status()}`);
 } finally {
   await browser.close();
 }
