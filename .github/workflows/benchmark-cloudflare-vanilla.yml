@@ -131,5 +131,7 @@ jobs:
         if: always()
         with:
           name: architecture-benchmark
-          path: lh-*.json
+          path: |
+            lh-*.json
+            test-artifacts/*.png
           retention-days: 14
