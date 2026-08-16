@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: vanilla-architecture-benchmark
+  cancel-in-progress: true
+
 jobs:
   benchmark:
     runs-on: ubuntu-latest
@@ -20,6 +24,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+
+      - name: Validate Wrangler configuration and generate bindings types
+        run: |
+          npx wrangler types prototype/vanilla/worker-configuration.d.ts --config prototype/vanilla/wrangler.jsonc
+          test -s prototype/vanilla/worker-configuration.d.ts
 
       - name: Deploy isolated vanilla Worker
         env:
@@ -42,10 +51,12 @@ jobs:
           for attempt in {1..12}; do
             home_status="$(curl --silent --show-error --max-time 15 -o /tmp/vanilla.html -w '%{http_code}' "$VANILLA_URL/" || true)"
             js_status="$(curl --silent --show-error --max-time 15 -o /tmp/vanilla.js -w '%{http_code}' "$VANILLA_URL/benchmark.js" || true)"
-            echo "Preview readiness ${attempt}/12: home=${home_status}, js=${js_status}"
-            if [ "$home_status" = 200 ] && [ "$js_status" = 200 ] \
-              && grep -q 'Cloudflare edge prototype' /tmp/vanilla.html \
-              && grep -q 'window.__CAMERAS__=' /tmp/vanilla.html; then
+            api_status="$(curl --silent --show-error --max-time 15 -o /tmp/cameras.json -w '%{http_code}' "$VANILLA_URL/api/cameras?source=arcgis" || true)"
+            echo "Preview readiness ${attempt}/12: home=${home_status}, js=${js_status}, api=${api_status}"
+            if [ "$home_status" = 200 ] && [ "$js_status" = 200 ] && [ "$api_status" = 200 ] \
+              && grep -q 'Seattle Traffic Watch' /tmp/vanilla.html \
+              && grep -q 'window.__CAMERAS__=' /tmp/vanilla.html \
+              && grep -q 'map-view' /tmp/vanilla.html; then
               ready=1
               break
             fi
@@ -53,7 +64,49 @@ jobs:
           done
           test "$ready" -eq 1 || { echo 'Vanilla preview did not become healthy'; head -c 500 /tmp/vanilla.html || true; exit 1; }
 
-      - name: Benchmark React production and vanilla prototype
+      - name: Feature parity browser checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx playwright install chromium --with-deps >/dev/null
+          cat > /tmp/parity.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          const base = process.env.VANILLA_URL;
+          const browser = await chromium.launch({headless:true});
+          const page = await browser.newPage({viewport:{width:390,height:844}});
+          const failures=[];
+          const check=(condition,message)=>{if(!condition) failures.push(message)};
+          await page.goto(base,{waitUntil:'networkidle'});
+          check(await page.locator('.camera-card').count() >= 6,'initial camera cards missing');
+          check(await page.locator('#collections [data-collection]').count() === 7,'camera collections missing');
+          await page.locator('#search').fill('bridge');
+          await page.waitForTimeout(150);
+          check(new URL(page.url()).searchParams.get('q') === 'bridge','search URL state missing');
+          await page.locator('[data-collection="live"]').click();
+          check((new URL(page.url()).searchParams.get('collections')||'').includes('live'),'collection URL state missing');
+          await page.locator('#search').fill('');
+          await page.locator('[data-clear-collections]').click();
+          const first = page.locator('.camera-open').first();
+          await first.click();
+          check(await page.locator('#modal[open]').count() === 1,'focus modal did not open');
+          await page.locator('#close').click();
+          await page.locator('#map-view').click();
+          check(new URL(page.url()).searchParams.get('view') === 'map','map URL state missing');
+          check(await page.locator('#map').isVisible(),'map shell missing');
+          await page.locator('#grid-view').click();
+          await page.locator('#settings-toggle').click();
+          check(await page.locator('#settings').isVisible(),'source settings missing');
+          const api = await page.request.get(`${base}/api/cameras?source=sdot`);
+          check(api.ok(),'SDOT fallback endpoint failed');
+          const image = await page.request.get(`${base}/api/image?path=%2Ftrafficcams%2Fimages%2F1_5th_Union.jpg&w=480`);
+          check(image.status() !== 400,'image proxy rejected valid-shaped path');
+          await browser.close();
+          if (failures.length) { console.error(failures.join('\n')); process.exit(1); }
+          console.log('Feature parity checks passed');
+          EOF
+          node /tmp/parity.mjs
+
+      - name: Benchmark React production and vanilla replacement
         shell: bash
         run: |
           set -euo pipefail
@@ -69,10 +122,10 @@ jobs:
             done
           done
 
-      - name: Publish comparison
+      - name: Publish comparison and enforce replacement budget
         shell: python
         run: |
-          import json, os, statistics
+          import json, os, statistics, sys
           def row(app, i):
               with open(f'lh-{app}-{i}.json') as f: r=json.load(f)
               a=r['audits']; c=r['categories']
@@ -87,15 +140,26 @@ jobs:
               }
           data={app:[row(app,i) for i in (1,2,3)] for app in ('react','vanilla')}
           with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
-              f.write('\n## React vs Cloudflare vanilla\n\n')
-              f.write('| App | Scores | Min | Median | LCP median | TBT median | CLS max | Transfer median |\n')
-              f.write('|---|---|---:|---:|---:|---:|---:|---:|\n')
+              f.write('\n## React vs Cloudflare-native feature-parity replacement\n\n')
+              f.write('| App | Scores | Min | Median | LCP median | TBT median | CLS max | Transfer median | A11y min |\n')
+              f.write('|---|---|---:|---:|---:|---:|---:|---:|---:|\n')
               for app, rows in data.items():
                   scores=[x['score'] for x in rows]
-                  f.write(f"| {app.title()} | {' / '.join(map(str,scores))} | {min(scores)} | {statistics.median(scores):g} | {statistics.median(x['lcp'] for x in rows)/1000:.2f}s | {statistics.median(x['tbt'] for x in rows):.0f}ms | {max(x['cls'] for x in rows):.3f} | {statistics.median(x['bytes'] for x in rows)/1024:.0f} KiB |\n")
+                  f.write(f"| {app.title()} | {' / '.join(map(str,scores))} | {min(scores)} | {statistics.median(scores):g} | {statistics.median(x['lcp'] for x in rows)/1000:.2f}s | {statistics.median(x['tbt'] for x in rows):.0f}ms | {max(x['cls'] for x in rows):.3f} | {statistics.median(x['bytes'] for x in rows)/1024:.0f} KiB | {min(x['a11y'] for x in rows)} |\n")
           print(json.dumps(data, indent=2))
+          v=data['vanilla']
+          failures=[]
+          if min(x['score'] for x in v) < 95: failures.append('minimum Lighthouse performance must be >=95')
+          if statistics.median(x['lcp'] for x in v) > 2500: failures.append('median LCP must be <=2.5s')
+          if statistics.median(x['tbt'] for x in v) > 100: failures.append('median TBT must be <=100ms')
+          if max(x['cls'] for x in v) > 0.05: failures.append('max CLS must be <=0.05')
+          if min(x['a11y'] for x in v) < 98: failures.append('accessibility must be >=98')
+          if failures:
+              print('\n'.join(failures), file=sys.stderr)
+              sys.exit(1)
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: architecture-benchmark
           path: lh-*.json
