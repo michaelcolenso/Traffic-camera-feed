@@ -24,6 +24,11 @@ try {
   await page.locator('[data-clear-collections]').click();
   await page.locator('.camera-open').first().click();
   check(await page.locator('#modal[open]').count() === 1, 'focus modal did not open');
+  const firstFocused = new URL(page.url()).searchParams.get('camera');
+  await page.locator('#modal [data-focus]').filter({ hasText: 'Next' }).click();
+  const nextFocused = new URL(page.url()).searchParams.get('camera');
+  check(await page.locator('#modal[open]').count() === 1, 'focus modal closed during next-camera navigation');
+  check(Boolean(nextFocused) && nextFocused !== firstFocused, 'next-camera navigation did not update focus URL state');
   await page.locator('#close').click();
 
   await page.locator('#map-view').click();
@@ -33,6 +38,7 @@ try {
 
   await page.locator('#settings-toggle').click();
   check(await page.locator('#settings').isVisible(), 'source settings missing');
+  check(await page.locator('#settings-toggle').getAttribute('aria-expanded') === 'true', 'settings expanded state missing');
 
   const bootstrap = await page.evaluate(() => window.__CAMERAS__ || []);
   check(bootstrap.length > 0, 'bootstrap camera data missing');
@@ -50,6 +56,7 @@ try {
   await page.locator('#apply-source').click();
   await page.waitForTimeout(100);
   check((await page.locator('#status-line').textContent())?.includes('SDOT Socrata'), 'SDOT source switch did not update the app');
+  check(await page.locator('#settings-toggle').getAttribute('aria-expanded') === 'false', 'settings expanded state not cleared after apply');
 
   if (bootstrap[0]?.imagePath) {
     const image = await page.request.get(`${base}/api/image?path=${encodeURIComponent(bootstrap[0].imagePath)}&w=480`);
