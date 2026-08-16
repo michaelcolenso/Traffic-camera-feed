@@ -10,10 +10,26 @@ const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
 const failures = [];
 const check = (condition, message) => { if (!condition) failures.push(message); };
 
+await page.addInitScript(() => {
+  class HlsStub {
+    static Events = { ERROR: 'error' };
+    static isSupported() { return true; }
+    loadSource() {}
+    attachMedia() {}
+    on() {}
+    destroy() {}
+  }
+  window.Hls = HlsStub;
+  HTMLMediaElement.prototype.play = function play() { return Promise.resolve(); };
+  HTMLMediaElement.prototype.pause = function pause() {};
+  HTMLMediaElement.prototype.load = function load() {};
+});
+
 try {
   await page.goto(base, { waitUntil: 'networkidle' });
   check(await page.locator('.camera-card').count() >= 6, 'initial camera cards missing');
   check(await page.locator('#collections [data-collection]').count() === 7, 'camera collections missing');
+  check(await page.locator('[data-live-grid]').count() === 1, 'Live Grid toggle missing');
   await page.screenshot({ path: 'test-artifacts/mobile-grid.png', fullPage: true });
 
   await page.locator('#search').fill('bridge');
@@ -25,6 +41,35 @@ try {
 
   await page.locator('#search').fill('');
   await page.locator('[data-clear-collections]').click();
+
+  const manualPlay = page.locator('[data-grid-play]').first();
+  if (await manualPlay.count()) {
+    await manualPlay.click();
+    await page.waitForTimeout(50);
+    check(await page.locator('.camera-card.is-live .grid-video').count() === 1, 'manual in-grid live playback did not start');
+    check(await manualPlay.getAttribute('aria-label')?.then((value) => value?.startsWith('Stop')), 'manual live button did not switch to stop state');
+    await manualPlay.click();
+    await page.waitForTimeout(20);
+    check(await page.locator('.camera-card.is-live .grid-video').count() === 0, 'manual in-grid live playback did not stop');
+  } else {
+    failures.push('no live-capable grid card available for manual playback test');
+  }
+
+  await page.locator('[data-collection="live"]').click();
+  await page.waitForTimeout(100);
+  await page.locator('[data-live-grid]').click();
+  await page.waitForTimeout(180);
+  const autoVideos = page.locator('.camera-card.is-live .grid-video');
+  const autoCount = await autoVideos.count();
+  check(autoCount > 0, 'Live Grid did not start any visible streams');
+  check(autoCount <= 4, `Live Grid exceeded four-stream cap (${autoCount})`);
+  check(await page.locator('[data-live-grid]').getAttribute('aria-pressed') === 'true', 'Live Grid pressed state missing');
+  if (autoCount) check(await autoVideos.first().evaluate((video) => video.muted && video.playsInline), 'Live Grid video is not muted and inline');
+  await page.locator('[data-live-grid]').click();
+  await page.waitForTimeout(30);
+  check(await page.locator('.camera-card.is-live .grid-video').count() === 0, 'Live Grid auto streams did not stop when disabled');
+  await page.locator('[data-clear-collections]').click();
+
   await page.locator('.camera-open').first().click();
   check(await page.locator('#modal[open]').count() === 1, 'focus modal did not open');
   const firstFocused = new URL(page.url()).searchParams.get('camera');
