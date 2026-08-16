@@ -17,7 +17,7 @@ jobs:
   lighthouse:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v6
@@ -39,13 +39,18 @@ jobs:
           done
           exit 1
 
-      - name: Run mobile Lighthouse
+      - name: Run three mobile Lighthouse samples
+        shell: bash
         run: |
-          npx --yes lighthouse@latest https://cams.hoxel.dev/ \
-            --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" \
-            --output=json \
-            --output-path=./lighthouse-mobile.json \
-            --quiet
+          set -euo pipefail
+          for sample in 1 2 3; do
+            echo "Running mobile Lighthouse sample ${sample}/3"
+            npx --yes lighthouse@latest https://cams.hoxel.dev/ \
+              --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" \
+              --output=json \
+              --output-path="./lighthouse-mobile-${sample}.json" \
+              --quiet
+          done
 
       - name: Run desktop Lighthouse
         run: |
@@ -61,14 +66,16 @@ jobs:
         run: |
           import json
           import os
+          import statistics
 
-          rows = []
-          for label, filename in [('Mobile', 'lighthouse-mobile.json'), ('Desktop', 'lighthouse-desktop.json')]:
+          def read_report(filename):
               with open(filename) as f:
-                  report = json.load(f)
+                  return json.load(f)
+
+          def row(label, report):
               audits = report['audits']
               categories = report['categories']
-              rows.append({
+              return {
                   'device': label,
                   'performance': round(categories['performance']['score'] * 100),
                   'accessibility': round(categories['accessibility']['score'] * 100),
@@ -77,23 +84,33 @@ jobs:
                   'tbt': audits['total-blocking-time']['displayValue'],
                   'cls': audits['cumulative-layout-shift']['displayValue'],
                   'speed_index': audits['speed-index']['displayValue'],
-              })
+              }
+
+          mobile_rows = [row(f'Mobile {sample}', read_report(f'lighthouse-mobile-{sample}.json')) for sample in range(1, 4)]
+          desktop_row = row('Desktop', read_report('lighthouse-desktop.json'))
+          rows = mobile_rows + [desktop_row]
+          mobile_scores = [item['performance'] for item in mobile_rows]
 
           print(json.dumps(rows, indent=2))
+          print(f"Mobile performance min/median/max: {min(mobile_scores)}/{statistics.median(mobile_scores):g}/{max(mobile_scores)}")
+
           summary = os.environ['GITHUB_STEP_SUMMARY']
           with open(summary, 'a') as f:
               f.write('## cams.hoxel.dev Lighthouse\n\n')
-              f.write('| Device | Performance | Accessibility | FCP | LCP | TBT | CLS | Speed Index |\n')
-              f.write('|---|---:|---:|---:|---:|---:|---:|---:|---:|\n')
-              for row in rows:
-                  f.write(f"| {row['device']} | {row['performance']} | {row['accessibility']} | {row['fcp']} | {row['lcp']} | {row['tbt']} | {row['cls']} | {row['speed_index']} |\n")
+              f.write(f"**Mobile performance min / median / max:** {min(mobile_scores)} / {statistics.median(mobile_scores):g} / {max(mobile_scores)}\n\n")
+              f.write('| Sample | Performance | Accessibility | FCP | LCP | TBT | CLS | Speed Index |\n')
+              f.write('|---|---:|---:|---:|---:|---:|---:|---:|\n')
+              for item in rows:
+                  f.write(f"| {item['device']} | {item['performance']} | {item['accessibility']} | {item['fcp']} | {item['lcp']} | {item['tbt']} | {item['cls']} | {item['speed_index']} |\n")
 
       - name: Upload Lighthouse reports
         uses: actions/upload-artifact@v4
         with:
           name: lighthouse-production
           path: |
-            lighthouse-mobile.json
+            lighthouse-mobile-1.json
+            lighthouse-mobile-2.json
+            lighthouse-mobile-3.json
             lighthouse-desktop.json
           retention-days: 14
 
@@ -103,10 +120,9 @@ jobs:
           import json
           import sys
 
-          with open('lighthouse-mobile.json') as f:
-              mobile = json.load(f)
-          with open('lighthouse-desktop.json') as f:
-              desktop = json.load(f)
+          def read_report(filename):
+              with open(filename) as f:
+                  return json.load(f)
 
           def score(report, category):
               return round(report['categories'][category]['score'] * 100)
@@ -114,19 +130,30 @@ jobs:
           def numeric(report, audit):
               return report['audits'][audit]['numericValue']
 
+          mobiles = [read_report(f'lighthouse-mobile-{sample}.json') for sample in range(1, 4)]
+          desktop = read_report('lighthouse-desktop.json')
           failures = []
-          checks = [
-              ('mobile performance', score(mobile, 'performance'), 85, '>='),
-              ('mobile accessibility', score(mobile, 'accessibility'), 100, '>='),
+
+          for index, mobile in enumerate(mobiles, start=1):
+              checks = [
+                  (f'mobile {index} performance', score(mobile, 'performance'), 85, '>='),
+                  (f'mobile {index} accessibility', score(mobile, 'accessibility'), 100, '>='),
+                  (f'mobile {index} LCP ms', numeric(mobile, 'largest-contentful-paint'), 4000, '<='),
+                  (f'mobile {index} TBT ms', numeric(mobile, 'total-blocking-time'), 1000, '<='),
+                  (f'mobile {index} CLS', numeric(mobile, 'cumulative-layout-shift'), 0.1, '<='),
+              ]
+              for name, actual, limit, op in checks:
+                  passed = actual >= limit if op == '>=' else actual <= limit
+                  print(f"{'PASS' if passed else 'FAIL'} {name}: {actual:.2f} {op} {limit}")
+                  if not passed:
+                      failures.append(f'{name}: {actual:.2f} (required {op} {limit})')
+
+          desktop_checks = [
               ('desktop performance', score(desktop, 'performance'), 90, '>='),
               ('desktop accessibility', score(desktop, 'accessibility'), 100, '>='),
-              ('mobile LCP ms', numeric(mobile, 'largest-contentful-paint'), 4000, '<='),
-              ('mobile TBT ms', numeric(mobile, 'total-blocking-time'), 1000, '<='),
-              ('mobile CLS', numeric(mobile, 'cumulative-layout-shift'), 0.1, '<='),
           ]
-
-          for name, actual, limit, op in checks:
-              passed = actual >= limit if op == '>=' else actual <= limit
+          for name, actual, limit, op in desktop_checks:
+              passed = actual >= limit
               print(f"{'PASS' if passed else 'FAIL'} {name}: {actual:.2f} {op} {limit}")
               if not passed:
                   failures.append(f'{name}: {actual:.2f} (required {op} {limit})')
