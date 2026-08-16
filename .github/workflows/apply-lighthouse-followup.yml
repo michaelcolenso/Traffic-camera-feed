@@ -1,0 +1,32 @@
+name: Apply Lighthouse follow-up
+
+on:
+  push:
+    branches:
+      - perf/lighthouse-followup
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: python scripts/apply-lighthouse-followup.py
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Commit validated changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-lighthouse-followup.yml scripts/apply-lighthouse-followup.py
+          git add src/App.tsx src/components/CameraCard.tsx src/index.css
+          git commit -m "Apply measured Lighthouse improvements"
+          git push
