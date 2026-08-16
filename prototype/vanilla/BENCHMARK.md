@@ -1,36 +1,65 @@
-# Cloudflare Vanilla Architecture Benchmark
+# Cloudflare-Native Architecture Benchmark
 
-Benchmark run: GitHub Actions `31924827268` on the same `ubuntu-latest` runner for both architectures.
+Final feature-parity benchmark run: GitHub Actions `31925598169` on the same `ubuntu-latest` runner for both architectures.
 
-Both targets were measured with three Lighthouse mobile runs using identical Lighthouse flags and runner conditions.
+Both targets were measured with three Lighthouse mobile runs using identical Lighthouse flags and runner conditions after the replacement passed its Wrangler validation, deployment smoke test, and Playwright feature-parity suite.
 
-| Architecture | Scores | Min | Median | Median LCP | Median TBT | Max CLS | Median transfer |
-|---|---|---:|---:|---:|---:|---:|---:|
-| Production React (`cams.hoxel.dev`) | 74 / 87 / 85 | 74 | 85 | 3.70 s | 169 ms | 0.0003 | 287 KiB |
-| Cloudflare Worker + Static Assets + vanilla JS | 100 / 100 / 100 | 100 | 100 | 1.53 s | 0 ms | 0 | 145 KiB |
+| Architecture | Scores | Min | Median | Median LCP | Median TBT | Max CLS | Median transfer | A11y min |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| Production React (`cams.hoxel.dev`) | 76 / 87 / 87 | 76 | 87 | 3.54 s | 145 ms | 0.0003 | 277 KiB | 100 |
+| Cloudflare Worker + Static Assets + progressive JS | 100 / 99 / 99 | 99 | 99 | 2.12 s | 0 ms | 0 | 267 KiB | 100 |
 
 ## Raw measurements
 
-### React
+### React production
 
-1. Performance 74; Accessibility 100; FCP 2261 ms; LCP 3465 ms; TBT 480 ms; CLS 0; transfer 294075 bytes.
-2. Performance 87; Accessibility 100; FCP 2096 ms; LCP 3696 ms; TBT 123 ms; CLS 0.000302; transfer 294171 bytes.
-3. Performance 85; Accessibility 100; FCP 2079 ms; LCP 3742 ms; TBT 169 ms; CLS 0.000302; transfer 294147 bytes.
+1. Performance 76; Accessibility 100; FCP 2229 ms; LCP 3494 ms; TBT 503 ms; CLS 0.000302; transfer 283477 bytes.
+2. Performance 87; Accessibility 100; FCP 2050 ms; LCP 3701 ms; TBT 123 ms; CLS 0.000302; transfer 283485 bytes.
+3. Performance 87; Accessibility 100; FCP 2050 ms; LCP 3540 ms; TBT 145 ms; CLS 0.000293; transfer 284429 bytes.
 
-### Cloudflare vanilla prototype
+### Cloudflare-native feature-parity replacement
 
-1. Performance 100; Accessibility 100; FCP 1146 ms; LCP 1561 ms; TBT 0 ms; CLS 0; transfer 147780 bytes.
-2. Performance 100; Accessibility 100; FCP 1230 ms; LCP 1530 ms; TBT 0 ms; CLS 0; transfer 148049 bytes.
-3. Performance 100; Accessibility 100; FCP 1251 ms; LCP 1401 ms; TBT 0 ms; CLS 0; transfer 148153 bytes.
+1. Performance 100; Accessibility 100; FCP 968 ms; LCP 1230 ms; TBT 0 ms; CLS 0; transfer 273734 bytes.
+2. Performance 99; Accessibility 100; FCP 1366 ms; LCP 2124 ms; TBT 0 ms; CLS 0; transfer 274155 bytes.
+3. Performance 99; Accessibility 100; FCP 1364 ms; LCP 2121 ms; TBT 0 ms; CLS 0; transfer 273937 bytes.
 
-## Prototype architecture
+## Enforced replacement budget
 
-- Cloudflare Worker handles `/` and returns the first six current Seattle camera cards directly as HTML.
-- The Worker fetches and normalizes the Seattle ArcGIS camera layer and uses Cloudflare edge caching for the source response.
-- Workers Static Assets serves the small CSS and enhancement JavaScript.
-- `/api/image` validates Seattle camera image paths and uses Cloudflare image transformation at 480 px with AVIF/WebP negotiation.
-- The browser enhancement script handles search, progressive rendering, and a simple camera modal without a UI framework or hydration runtime.
+The benchmark workflow fails unless all of these remain true:
 
-## Interpretation
+- minimum mobile Lighthouse performance >= 95
+- median LCP <= 2.5 seconds
+- median TBT <= 100 milliseconds
+- maximum CLS <= 0.05
+- minimum accessibility score >= 98
 
-The benchmark strongly supports moving the critical camera-grid path away from a client-rendered React SPA toward edge-rendered HTML with small progressive enhancement. This prototype is not yet feature-parity with production: map mode, HLS playback, all collection filters, diagnostics, URL state, and the polished production UI still need to be ported before a production replacement decision.
+The final run passed every threshold.
+
+## Feature parity covered by browser regression tests
+
+The Playwright parity test exercises the production-critical interaction model rather than only checking that the page loads:
+
+- initial edge-rendered camera cards
+- all seven camera collections
+- search and shareable query-string state
+- collection filter query-string state
+- focus modal
+- map-mode switching and URL state
+- source settings
+- SDOT source-switch behavior with deterministic upstream mocking
+- real `/api/cameras` route behavior
+- real transformed camera image path
+
+## Replacement architecture
+
+- A Cloudflare Worker handles `/` and returns the first six current Seattle camera cards plus the filter toolbar directly as HTML.
+- The Worker fetches and normalizes the ArcGIS camera layer with Cloudflare edge caching; SDOT Socrata remains an alternate source.
+- Workers Static Assets serves the small CSS and progressive-enhancement JavaScript.
+- `/api/image` validates Seattle camera paths and uses Cloudflare image transforms with AVIF/WebP negotiation.
+- `/api/video` proxies HLS playlists and segments and rewrites same-origin playlist references.
+- Search, collections, diagnostics, URL state, periodic refresh, focus navigation, and mobile navigation are framework-free browser enhancements.
+- MapLibre and HLS.js are loaded only when those features are invoked.
+
+## Decision
+
+The feature-parity replacement clears the performance budget with substantial margin while retaining the core production behaviors. The production cutover can therefore be handled as a deployment/configuration change rather than another architecture experiment. React remains in the repository during the initial cutover window as the fastest rollback path.
