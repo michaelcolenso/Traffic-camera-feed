@@ -77,15 +77,30 @@ jobs:
           arcgis_url='https://services.arcgis.com/ZOyb2t4B0UYuYNYH/ArcGIS/rest/services/Traffic_Cameras_CDL/FeatureServer/0/query?where=STREAM_NAME%20IS%20NOT%20NULL%20AND%20SERVSTAT%20%3C%3E%20%27INACT%27&outFields=NAME%2CLOCATION%2CSTREAM_NAME%2CSERVSTAT&returnGeometry=false&resultRecordCount=25&f=json'
           curl --fail --silent --show-error --max-time 15 "$arcgis_url" -o /tmp/sdot-cameras.json
 
-          stream_name="$(jq -r '.features[]?.attributes.STREAM_NAME // empty' /tmp/sdot-cameras.json | awk 'NF {print; exit}')"
-          camera_name="$(jq -r '.features[]?.attributes | select(.STREAM_NAME != null and .STREAM_NAME != "") | (.LOCATION // .NAME // "SDOT camera")' /tmp/sdot-cameras.json | head -n1)"
-          test -n "$stream_name" || { echo "Official SDOT layer returned no active STREAM_NAME"; cat /tmp/sdot-cameras.json; exit 1; }
+          stream_ok=0
+          tested=0
+          while IFS=$'\t' read -r stream_name camera_name; do
+            test -n "$stream_name" || continue
+            tested=$((tested + 1))
+            stream_path="/live/${stream_name}.stream/playlist.m3u8"
+            encoded_path="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$stream_path")"
+            stream_url="https://cams.hoxel.dev/api/video?url=${encoded_path}"
+            echo "Testing SDOT HLS camera ${tested}: ${camera_name:-SDOT camera} (${stream_name})"
 
-          stream_path="/live/${stream_name}.stream/playlist.m3u8"
-          stream_url="https://cams.hoxel.dev/api/video?url=$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$stream_path")"
-          echo "Testing current SDOT HLS camera: ${camera_name} (${stream_name})"
+            if curl --fail --silent --show-error --max-time 8 "$stream_url" -o /tmp/sdot-playlist.m3u8 \
+              && grep -q '^#EXTM3U' /tmp/sdot-playlist.m3u8; then
+              stream_ok=1
+              echo "Working SDOT HLS stream found: ${stream_name}"
+              break
+            fi
 
-          curl --fail --silent --show-error --max-time 20 "$stream_url" -o /tmp/sdot-playlist.m3u8
-          grep -q '^#EXTM3U' /tmp/sdot-playlist.m3u8 || { echo "Current SDOT stream did not return an HLS manifest"; head -c 1000 /tmp/sdot-playlist.m3u8; exit 1; }
+            echo "Stream ${stream_name} unavailable; trying another active SDOT camera"
+            test "$tested" -lt 8 || break
+          done < <(
+            jq -r '.features[]?.attributes | select(.STREAM_NAME != null and .STREAM_NAME != "") | [(.STREAM_NAME // ""), (.LOCATION // .NAME // "SDOT camera")] | @tsv' /tmp/sdot-cameras.json
+          )
 
-          echo "Production smoke test passed, including live SDOT HLS manifest"
+          test "$tested" -gt 0 || { echo "Official SDOT layer returned no active STREAM_NAME"; cat /tmp/sdot-cameras.json; exit 1; }
+          test "$stream_ok" -eq 1 || { echo "None of the first ${tested} current SDOT streams returned an HLS manifest"; exit 1; }
+
+          echo "Production smoke test passed, including a live SDOT HLS manifest"
