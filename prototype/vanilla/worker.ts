@@ -145,6 +145,29 @@ function card(camera: Camera, index: number): string {
   </article>`;
 }
 
+const INITIAL_COLLECTIONS: Array<[string, string, string[]]> = [
+  ['live', 'Live streams', []],
+  ['downtown', 'Downtown', ['downtown', '5th', '4th', '3rd', '2nd', '1st', 'pike', 'pine', 'union', 'madison', 'james']],
+  ['bridges', 'Bridges', ['bridge', 'fremont', 'ballard', 'montlake', 'spokane', 'west seattle', 'university']],
+  ['i5', 'I-5', ['i-5', 'i5', 'interstate 5']],
+  ['aurora', 'Aurora / 99', ['aurora', 'sr 99', 'sr99', '99']],
+  ['recent', 'Recently refreshed', []],
+  ['issues', 'Signal issues', []],
+];
+
+function initialCollectionCount(cameras: Camera[], id: string, keywords: string[]): number {
+  if (id === 'live') return cameras.filter((camera) => Boolean(camera.videoUrl)).length;
+  if (id === 'recent' || id === 'issues') return 0;
+  return cameras.filter((camera) => keywords.some((keyword) => camera.label.toLowerCase().includes(keyword))).length;
+}
+
+function initialCollectionButtons(cameras: Camera[]): string {
+  return INITIAL_COLLECTIONS.map(([id, label, keywords]) => {
+    const count = initialCollectionCount(cameras, id, keywords);
+    return `<button class="chip" data-collection="${id}" aria-pressed="false">${esc(label)} <span>${count}</span></button>`;
+  }).join('');
+}
+
 function page(cameras: Camera[]): Response {
   const first = cameras.slice(0, 6);
   const bootstrap = JSON.stringify(cameras).replace(/</g, '\\u003c');
@@ -171,8 +194,8 @@ function page(cameras: Camera[]): Response {
       <p id="source-error" class="error" role="alert"></p>
     </section>
     <section class="toolbar">
-      <div id="collections" class="collections" aria-label="Camera collections"></div>
-      <div class="toolbar-row"><p id="visible-count">${cameras.length} visible / ${cameras.length} total</p><div class="match-toggle"><button id="match-all" class="active" aria-pressed="true">Match all</button><button id="match-any" aria-pressed="false">Match any</button></div><button id="diagnostics-toggle" class="chip">Diagnostics</button></div>
+      <div id="collections" class="collections" aria-label="Camera collections">${initialCollectionButtons(cameras)}</div>
+      <div class="toolbar-row"><p id="visible-count">${cameras.length} visible / ${cameras.length} total</p><div class="match-toggle"><button id="match-all" class="active" aria-pressed="true">Match all</button><button id="match-any" aria-pressed="false">Match any</button></div><button id="diagnostics-toggle" class="chip">Diagnostics · 0 issues</button></div>
       <div id="diagnostics" class="diagnostics" hidden></div>
     </section>
     <main id="main"><div id="grid" class="grid">${first.map(card).join('')}</div><div id="map" class="map-shell" hidden></div><div id="empty" class="empty" hidden>No cameras match the selected filters.</div><div id="sentinel" aria-hidden="true"></div></main>
