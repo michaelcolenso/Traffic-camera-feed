@@ -1,0 +1,92 @@
+name: Benchmark Cloudflare vanilla prototype
+
+on:
+  push:
+    branches:
+      - prototype/cloudflare-vanilla
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Deploy isolated vanilla Worker
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler deploy --config prototype/vanilla/wrangler.jsonc 2>&1 | tee /tmp/vanilla-deploy.log
+          url="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/vanilla-deploy.log | tail -1)"
+          test -n "$url" || { echo 'Could not determine workers.dev preview URL'; cat /tmp/vanilla-deploy.log; exit 1; }
+          echo "VANILLA_URL=$url" >> "$GITHUB_ENV"
+          echo "Vanilla prototype: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Smoke test prototype
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 15 "$VANILLA_URL/" -o /tmp/vanilla.html
+          grep -q 'Cloudflare edge prototype' /tmp/vanilla.html
+          grep -q 'window.__CAMERAS__=' /tmp/vanilla.html
+          curl --fail --silent --show-error --max-time 15 "$VANILLA_URL/benchmark.js" >/dev/null
+
+      - name: Benchmark React production and vanilla prototype
+        shell: bash
+        run: |
+          set -euo pipefail
+          for app in react vanilla; do
+            if [ "$app" = react ]; then url='https://cams.hoxel.dev/'; else url="$VANILLA_URL/"; fi
+            for sample in 1 2 3; do
+              echo "Lighthouse $app sample $sample"
+              npx --yes lighthouse@latest "$url" \
+                --chrome-flags='--headless --no-sandbox --disable-dev-shm-usage' \
+                --output=json \
+                --output-path="./lh-${app}-${sample}.json" \
+                --quiet
+            done
+          done
+
+      - name: Publish comparison
+        shell: python
+        run: |
+          import json, os, statistics
+          def row(app, i):
+              with open(f'lh-{app}-{i}.json') as f: r=json.load(f)
+              a=r['audits']; c=r['categories']
+              return {
+                'score': round(c['performance']['score']*100),
+                'a11y': round(c['accessibility']['score']*100),
+                'fcp': a['first-contentful-paint']['numericValue'],
+                'lcp': a['largest-contentful-paint']['numericValue'],
+                'tbt': a['total-blocking-time']['numericValue'],
+                'cls': a['cumulative-layout-shift']['numericValue'],
+                'bytes': a.get('total-byte-weight',{}).get('numericValue',0),
+              }
+          data={app:[row(app,i) for i in (1,2,3)] for app in ('react','vanilla')}
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write('\n## React vs Cloudflare vanilla\n\n')
+              f.write('| App | Scores | Min | Median | LCP median | TBT median | CLS max | Transfer median |\n')
+              f.write('|---|---|---:|---:|---:|---:|---:|---:|\n')
+              for app, rows in data.items():
+                  scores=[x['score'] for x in rows]
+                  f.write(f"| {app.title()} | {' / '.join(map(str,scores))} | {min(scores)} | {statistics.median(scores):g} | {statistics.median(x['lcp'] for x in rows)/1000:.2f}s | {statistics.median(x['tbt'] for x in rows):.0f}ms | {max(x['cls'] for x in rows):.3f} | {statistics.median(x['bytes'] for x in rows)/1024:.0f} KiB |\n")
+          print(json.dumps(data, indent=2))
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: architecture-benchmark
+          path: lh-*.json
+          retention-days: 14
