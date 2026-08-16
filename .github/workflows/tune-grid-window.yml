@@ -1,0 +1,41 @@
+name: Validate smaller initial grid
+
+on:
+  push:
+    branches:
+      - perf/smaller-initial-grid
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Tune initial grid window
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/App.tsx')
+          text = path.read_text()
+          text = text.replace('const INITIAL_CAMERA_COUNT = 12;\nconst CAMERA_PAGE_SIZE = 12;', 'const INITIAL_CAMERA_COUNT = 6;\nconst CAMERA_PAGE_SIZE = 6;')
+          text = text.replace("{ rootMargin: '1000px 0px' },", "{ rootMargin: '300px 0px' },")
+          path.write_text(text)
+          PY
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Commit validated change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tune-grid-window.yml
+          git add src/App.tsx
+          git commit -m "Reduce initial camera grid work"
+          git push
