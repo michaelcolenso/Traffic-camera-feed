@@ -26,8 +26,13 @@ type ViewMode = 'grid' | 'map';
 type DataSource = 'sdot' | 'arcgis';
 type CollectionMode = 'all' | 'any';
 
-const INITIAL_CAMERA_COUNT = 6;
+const MOBILE_INITIAL_CAMERA_COUNT = 6;
+const DESKTOP_INITIAL_CAMERA_COUNT = 16;
 const CAMERA_PAGE_SIZE = 6;
+
+function getInitialCameraCount(): number {
+  return window.matchMedia('(min-width: 768px)').matches ? DESKTOP_INITIAL_CAMERA_COUNT : MOBILE_INITIAL_CAMERA_COUNT;
+}
 
 function makeFetcher(source: DataSource, arcgisUrl: string) {
   return (_key: string): Promise<TrafficCamera[]> =>
@@ -62,7 +67,7 @@ export default function App() {
   const [healthByCamera, setHealthByCamera] = useState<Record<string, CameraHealth>>({});
   const [hasHydratedUrlCamera, setHasHydratedUrlCamera] = useState(false);
   const [lastSuccessfulSync, setLastSuccessfulSync] = useState<number | null>(null);
-  const [visibleCameraCount, setVisibleCameraCount] = useState(INITIAL_CAMERA_COUNT);
+  const [visibleCameraCount, setVisibleCameraCount] = useState(getInitialCameraCount);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const deferredQuery = useDeferredValue(searchQuery);
 
@@ -84,7 +89,7 @@ export default function App() {
   );
 
   useEffect(() => {
-    setVisibleCameraCount(INITIAL_CAMERA_COUNT);
+    setVisibleCameraCount(getInitialCameraCount());
   }, [activeCollections, collectionMode, deferredQuery, source]);
 
   useEffect(() => {
