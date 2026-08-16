@@ -14,6 +14,11 @@ let map = null;
 let mapMarkers = [];
 let mapReadyPromise = null;
 let hls = null;
+let hlsScriptPromise = null;
+let liveGridEnabled = false;
+const gridPlayers = new Map();
+const visibleCards = new Set();
+const MAX_AUTO_LIVE = 4;
 
 const $ = (selector) => document.querySelector(selector);
 const grid = $('#grid');
@@ -86,14 +91,19 @@ function refilter() {
     return collectionMode === 'all' ? values.every(Boolean) : values.some(Boolean);
   });
   visible = matchMedia('(min-width:768px)').matches ? 16 : 6;
+  stopAllGridVideo();
   renderGrid(true);
   renderCollections();
   updateCounts();
   updateUrl();
   if (view === 'map') renderMapMarkers();
+  if (liveGridEnabled && view === 'grid') queueMicrotask(syncLiveGrid);
 }
 function card(camera, index) {
-  return `<article class="camera-card" data-camera-id="${escapeHtml(camera.id)}"><button class="camera-open" data-camera="${escapeHtml(camera.id)}" aria-label="View ${escapeHtml(camera.label)}"><div class="image-shell"><img src="${imageUrl(camera)}" alt="${escapeHtml(camera.label)}" width="480" height="270" ${index ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async"></div><div class="card-copy"><h2>${escapeHtml(camera.label)}</h2><span>${camera.videoUrl ? 'Live' : 'Snapshot'}</span></div></button></article>`;
+  const liveControl = camera.videoUrl
+    ? `<button class="grid-play" type="button" data-grid-play="${escapeHtml(camera.id)}" aria-label="Play live video for ${escapeHtml(camera.label)}"><span class="play-icon">▶</span><span class="play-label">Play live</span></button>`
+    : '';
+  return `<article class="camera-card" data-camera-id="${escapeHtml(camera.id)}"><div class="image-shell"><img src="${imageUrl(camera)}" alt="${escapeHtml(camera.label)}" width="480" height="270" ${index ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async">${liveControl}<span class="live-badge" hidden>LIVE</span></div><button class="camera-open" data-camera="${escapeHtml(camera.id)}" aria-label="View ${escapeHtml(camera.label)}"><div class="card-copy"><h2>${escapeHtml(camera.label)}</h2><span>${camera.videoUrl ? 'Live' : 'Snapshot'}</span></div></button></article>`;
 }
 function bindImageHealth(root = grid) {
   root.querySelectorAll('.camera-card img').forEach((img) => {
@@ -105,21 +115,49 @@ function bindImageHealth(root = grid) {
     img.addEventListener('error', () => noteHealth(camera,'image-error'));
   });
 }
+const cardObserver = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    const card = entry.target;
+    const id = card.dataset.cameraId;
+    if (!id) continue;
+    if (entry.isIntersecting && entry.intersectionRatio >= 0.25) visibleCards.add(id);
+    else {
+      visibleCards.delete(id);
+      if (gridPlayers.has(id)) stopGridVideo(id);
+    }
+  }
+  if (liveGridEnabled && view === 'grid') syncLiveGrid();
+}, {threshold:[0,0.25,0.6],rootMargin:'80px 0px'});
+function observeCards(root = grid) {
+  root.querySelectorAll('.camera-card').forEach((card) => {
+    if (card.dataset.liveObserved) return;
+    card.dataset.liveObserved = '1';
+    cardObserver.observe(card);
+  });
+}
 function renderGrid(reset = false) {
-  if (reset) grid.textContent = '';
+  if (reset) {
+    grid.querySelectorAll('.camera-card').forEach((card)=>cardObserver.unobserve(card));
+    visibleCards.clear();
+    grid.textContent = '';
+  }
   const target = Math.min(visible, filtered.length);
-  if (grid.children.length > target) grid.textContent = '';
+  if (grid.children.length > target) {
+    stopAllGridVideo();
+    grid.textContent = '';
+  }
   for (let i = grid.children.length; i < target; i++) grid.insertAdjacentHTML('beforeend', card(filtered[i],i));
   empty.hidden = filtered.length !== 0;
   sentinel.hidden = target >= filtered.length;
   bindImageHealth();
+  observeCards();
 }
 function renderCollections() {
   collectionsEl.innerHTML = COLLECTIONS.map(([id,label,description]) => {
     const count = cameras.filter((camera) => matchesCollection(camera,id)).length;
     const active = activeCollections.includes(id);
     return `<button class="chip ${active?'active':''}" data-collection="${id}" title="${escapeHtml(description)}" aria-pressed="${active}">${escapeHtml(label)} <span>${count}</span></button>`;
-  }).join('') + (activeCollections.length ? '<button class="chip" data-clear-collections>Clear all</button>' : '');
+  }).join('') + (activeCollections.length ? '<button class="chip" data-clear-collections>Clear all</button>' : '') + `<button class="chip live-grid-toggle ${liveGridEnabled?'active':''}" data-live-grid aria-pressed="${liveGridEnabled}" title="Autoplay up to ${MAX_AUTO_LIVE} visible live cameras, muted">${liveGridEnabled?'● Live Grid on':'▶ Live Grid'}</button>`;
 }
 function issueCount() { return [...health.values()].filter((h) => h.lastImageError || h.lastStreamError).length; }
 function updateCounts() {
@@ -172,6 +210,7 @@ async function loadCameras(force = false) {
 function setView(next) {
   view = next;
   const isMap = view === 'map';
+  if (isMap) stopAllGridVideo();
   grid.hidden = isMap;
   sentinel.hidden = isMap || visible >= filtered.length;
   mapEl.hidden = !isMap;
@@ -181,9 +220,15 @@ function setView(next) {
   document.querySelectorAll('[data-mobile-view]').forEach((button)=>button.classList.toggle('active',button.dataset.mobileView===view));
   updateUrl();
   if (isMap) ensureMap();
+  else if (liveGridEnabled) queueMicrotask(syncLiveGrid);
 }
 function loadScript(src) {
   return new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=reject;document.head.append(s);});
+}
+function ensureHlsScript() {
+  if (window.Hls) return Promise.resolve();
+  if (!hlsScriptPromise) hlsScriptPromise = loadScript('https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js').catch((error)=>{hlsScriptPromise=null;throw error;});
+  return hlsScriptPromise;
 }
 function loadStyle(href) {
   if ([...document.styleSheets].some((s)=>s.href===href)) return;
@@ -225,19 +270,111 @@ function nearest(camera, limit = 4) {
   if (!Number.isFinite(camera.lat)||!Number.isFinite(camera.lng)) return [];
   return cameras.filter((c)=>c.id!==camera.id&&Number.isFinite(c.lat)&&Number.isFinite(c.lng)).map((c)=>({c,d:Math.hypot(c.lat-camera.lat,c.lng-camera.lng)})).sort((a,b)=>a.d-b.d).slice(0,limit).map((x)=>x.c);
 }
+async function attachHls(video, camera, onFatal) {
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = camera.videoUrl;
+    return null;
+  }
+  await ensureHlsScript();
+  if (!window.Hls?.isSupported()) throw new Error('HLS playback is not supported');
+  const instance = new Hls({enableWorker:true,lowLatencyMode:false});
+  instance.loadSource(camera.videoUrl);
+  instance.attachMedia(video);
+  instance.on(Hls.Events.ERROR,(_event,data)=>{if(data.fatal)onFatal?.(data);});
+  return instance;
+}
 async function setupVideo(camera) {
   if (!camera.videoUrl) return;
   const video = $('#focus-video'); if (!video) return;
-  if (video.canPlayType('application/vnd.apple.mpegurl')) { video.src=camera.videoUrl; return; }
   try {
-    if (!window.Hls) await loadScript('https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js');
-    if (window.Hls?.isSupported()) {
-      hls = new Hls({enableWorker:true,lowLatencyMode:false});hls.loadSource(camera.videoUrl);hls.attachMedia(video);
-      hls.on(Hls.Events.ERROR,(_event,data)=>{if(data.fatal)noteHealth(camera,'stream-error');});
-    }
+    hls = await attachHls(video,camera,()=>noteHealth(camera,'stream-error'));
   } catch { noteHealth(camera,'stream-error'); }
 }
 function destroyVideo() { if (hls){hls.destroy();hls=null;} }
+
+function updateGridPlayerUi(id, playing) {
+  const card = grid.querySelector(`.camera-card[data-camera-id="${CSS.escape(id)}"]`);
+  if (!card) return;
+  card.classList.toggle('is-live',playing);
+  const button = card.querySelector('[data-grid-play]');
+  const badge = card.querySelector('.live-badge');
+  if (button) {
+    button.classList.toggle('is-playing',playing);
+    button.setAttribute('aria-label',`${playing?'Stop':'Play'} live video for ${cameraById(id)?.label || 'camera'}`);
+    button.querySelector('.play-icon').textContent = playing ? '■' : '▶';
+    button.querySelector('.play-label').textContent = playing ? 'Stop live' : 'Play live';
+  }
+  if (badge) badge.hidden = !playing;
+}
+function stopGridVideo(id) {
+  const player = gridPlayers.get(id);
+  if (!player) return;
+  player.hls?.destroy();
+  try { player.video.pause(); } catch {}
+  player.video.removeAttribute('src');
+  player.video.load();
+  player.video.remove();
+  const card = grid.querySelector(`.camera-card[data-camera-id="${CSS.escape(id)}"]`);
+  const img = card?.querySelector('.image-shell img');
+  if (img) img.hidden = false;
+  gridPlayers.delete(id);
+  updateGridPlayerUi(id,false);
+}
+function stopAllGridVideo() {
+  [...gridPlayers.keys()].forEach(stopGridVideo);
+}
+async function startGridVideo(id, mode = 'manual') {
+  if (gridPlayers.has(id)) return;
+  const camera = cameraById(id);
+  const card = grid.querySelector(`.camera-card[data-camera-id="${CSS.escape(id)}"]`);
+  if (!camera?.videoUrl || !card) return;
+  const shell = card.querySelector('.image-shell');
+  const img = shell?.querySelector('img');
+  if (!shell || !img) return;
+  const video = document.createElement('video');
+  video.className = 'grid-video';
+  video.muted = true;
+  video.defaultMuted = true;
+  video.playsInline = true;
+  video.autoplay = true;
+  video.preload = 'none';
+  video.poster = imageUrl(camera,480,true);
+  video.setAttribute('aria-label',`Live video for ${camera.label}`);
+  shell.insertBefore(video,img);
+  img.hidden = true;
+  updateGridPlayerUi(id,true);
+  const player = {video,hls:null,mode};
+  gridPlayers.set(id,player);
+  try {
+    player.hls = await attachHls(video,camera,()=>{noteHealth(camera,'stream-error');stopGridVideo(id);});
+    await video.play();
+  } catch {
+    noteHealth(camera,'stream-error');
+    stopGridVideo(id);
+  }
+}
+function syncLiveGrid() {
+  if (!liveGridEnabled || view !== 'grid' || document.hidden) return;
+  const autoCandidates = [...visibleCards]
+    .map(cameraById)
+    .filter((camera)=>camera?.videoUrl)
+    .slice(0,MAX_AUTO_LIVE);
+  const target = new Set(autoCandidates.map((camera)=>camera.id));
+  for (const [id,player] of gridPlayers) {
+    if (player.mode === 'auto' && !target.has(id)) stopGridVideo(id);
+  }
+  for (const camera of autoCandidates) {
+    if (!gridPlayers.has(camera.id)) startGridVideo(camera.id,'auto');
+  }
+}
+function setLiveGrid(enabled) {
+  liveGridEnabled = enabled;
+  if (!enabled) {
+    for (const [id,player] of [...gridPlayers]) if (player.mode === 'auto') stopGridVideo(id);
+  } else if (view === 'grid') syncLiveGrid();
+  renderCollections();
+}
+
 function openFocus(id) {
   const camera=cameraById(id); if (!camera) return;
   destroyVideo(); focusedId=id; updateUrl();
@@ -250,11 +387,27 @@ function openFocus(id) {
 }
 function closeFocus() { destroyVideo();focusedId=null;updateUrl();modal.close(); }
 
-grid.addEventListener('click',(event)=>{const button=event.target.closest('.camera-open');if(button)openFocus(button.dataset.camera);});
+grid.addEventListener('click',(event)=>{
+  const play=event.target.closest('[data-grid-play]');
+  if (play) {
+    event.preventDefault();
+    event.stopPropagation();
+    const id=play.dataset.gridPlay;
+    if (gridPlayers.has(id)) stopGridVideo(id); else startGridVideo(id,'manual');
+    return;
+  }
+  const button=event.target.closest('.camera-open');if(button)openFocus(button.dataset.camera);
+});
 modalBody.addEventListener('click',(event)=>{const button=event.target.closest('[data-focus]');if(button)openFocus(button.dataset.focus);});
 close.addEventListener('click',closeFocus);modal.addEventListener('click',(event)=>{if(event.target===modal)closeFocus();});modal.addEventListener('close',()=>{destroyVideo();focusedId=null;updateUrl();});
 search.addEventListener('input',refilter);
-collectionsEl.addEventListener('click',(event)=>{const button=event.target.closest('button');if(!button)return;if(button.dataset.clearCollections!==undefined)activeCollections=[];else if(button.dataset.collection){const id=button.dataset.collection;activeCollections=activeCollections.includes(id)?activeCollections.filter((x)=>x!==id):[...activeCollections,id];}refilter();});
+collectionsEl.addEventListener('click',(event)=>{
+  const button=event.target.closest('button');if(!button)return;
+  if (button.dataset.liveGrid !== undefined) { setLiveGrid(!liveGridEnabled); return; }
+  if(button.dataset.clearCollections!==undefined)activeCollections=[];
+  else if(button.dataset.collection){const id=button.dataset.collection;activeCollections=activeCollections.includes(id)?activeCollections.filter((x)=>x!==id):[...activeCollections,id];}
+  refilter();
+});
 $('#match-all').addEventListener('click',()=>{collectionMode='all';$('#match-all').classList.add('active');$('#match-any').classList.remove('active');refilter();});
 $('#match-any').addEventListener('click',()=>{collectionMode='any';$('#match-any').classList.add('active');$('#match-all').classList.remove('active');refilter();});
 $('#grid-view').addEventListener('click',()=>setView('grid'));$('#map-view').addEventListener('click',()=>setView('map'));document.querySelectorAll('[data-mobile-view]').forEach((b)=>b.addEventListener('click',()=>setView(b.dataset.mobileView)));
@@ -265,11 +418,15 @@ $('#source-sdot').addEventListener('click',()=>{source='sdot';$('#source-sdot').
 $('#restore-source').addEventListener('click',()=>{$('#arcgis-url').value=DEFAULT_ARCGIS;featureService=DEFAULT_ARCGIS;sourceError.textContent='';});
 $('#apply-source').addEventListener('click',async()=>{featureService=$('#arcgis-url').value.trim()||DEFAULT_ARCGIS;await loadCameras(true);if(!sourceError.textContent){settings.hidden=true;$('#settings-toggle').setAttribute('aria-expanded','false');}});
 $('#diagnostics-toggle').addEventListener('click',()=>{diagnostics.hidden=!diagnostics.hidden;if(!diagnostics.hidden)renderDiagnostics();});
-new IntersectionObserver(([entry])=>{if(entry.isIntersecting&&view==='grid'&&visible<filtered.length){visible+=6;renderGrid();}}, {rootMargin:'300px 0px'}).observe(sentinel);
+new IntersectionObserver(([entry])=>{if(entry.isIntersecting&&view==='grid'&&visible<filtered.length){visible+=6;renderGrid();if(liveGridEnabled)queueMicrotask(syncLiveGrid);}}, {rootMargin:'300px 0px'}).observe(sentinel);
 
+document.addEventListener('visibilitychange',()=>{
+  if (document.hidden) stopAllGridVideo();
+  else if (liveGridEnabled && view === 'grid') syncLiveGrid();
+});
 setInterval(()=>{
   if (document.hidden) return;
-  document.querySelectorAll('.camera-card img').forEach((img)=>{const card=img.closest('.camera-card');const camera=cameraById(card?.dataset.cameraId);if(camera)img.src=imageUrl(camera,480,true);});
+  document.querySelectorAll('.camera-card img:not([hidden])').forEach((img)=>{const card=img.closest('.camera-card');const camera=cameraById(card?.dataset.cameraId);if(camera)img.src=imageUrl(camera,480,true);});
 },30000);
 setInterval(()=>loadCameras(false),5*60*1000);
 
