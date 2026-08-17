@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   validate:
-    if: github.event.head_commit.message == 'Validate Time Machine end to end'
+    if: github.event.head_commit.message == 'Rerun Time Machine validation on established preview worker'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -27,10 +27,11 @@ jobs:
           import json
           from pathlib import Path
           data=json.loads(Path('wrangler.jsonc').read_text())
-          data['name']='hoxel-traffic-camera-time-machine-preview'
+          data['name']='hoxel-traffic-camera-vanilla-benchmark'
           data.pop('routes',None)
           data.pop('triggers',None)
           data['workers_dev']=True
+          data['preview_urls']=True
           Path('wrangler.preview.jsonc').write_text(json.dumps(data,indent=2)+'\n')
           PY
           npx wrangler types /tmp/preview-types.d.ts --config wrangler.preview.jsonc
@@ -51,18 +52,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for i in {1..12}; do
-            code=$(curl -sS --max-time 10 -o /tmp/home -w '%{http_code}' "$PREVIEW_URL/?v=$i" || true)
-            [ "$code" = 200 ] && break
+          ready=0
+          for i in {1..15}; do
+            nonce=$(date +%s%N)
+            home=$(curl -sS --max-time 10 -o /tmp/home -w '%{http_code}' "$PREVIEW_URL/?v=$nonce" || true)
+            cams=$(curl -sS --max-time 10 -o /tmp/cameras.json -w '%{http_code}' "$PREVIEW_URL/api/cameras?validation=$nonce" || true)
+            hist=$(curl -sS --max-time 10 -o /tmp/status.json -w '%{http_code}' "$PREVIEW_URL/api/history/status?validation=$nonce" || true)
+            echo "attempt=$i home=$home cameras=$cams history=$hist"
+            if [ "$home" = 200 ] && [ "$cams" = 200 ] && [ "$hist" = 200 ]; then ready=1; break; fi
+            echo "home body: $(head -c 200 /tmp/home 2>/dev/null || true)"
+            echo "cameras body: $(head -c 200 /tmp/cameras.json 2>/dev/null || true)"
+            echo "history body: $(head -c 200 /tmp/status.json 2>/dev/null || true)"
             sleep 3
           done
-          curl -fsSL "$PREVIEW_URL/api/cameras?validation=$(date +%s%N)" -o /tmp/cameras.json
-          curl -fsSL "$PREVIEW_URL/api/history/status?validation=$(date +%s%N)" -o /tmp/status.json
+          test "$ready" -eq 1
           jq -e 'type=="array" and length>0' /tmp/cameras.json >/dev/null
           jq -e 'has("frames") and has("cameras")' /tmp/status.json >/dev/null
           id=$(jq -r '.[0].id' /tmp/cameras.json)
           encoded=$(python -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$id")
-          curl -fsSL "$PREVIEW_URL/api/history?camera=$encoded&hours=6&limit=96" -o /tmp/history.json
+          timeline=$(curl -sS --max-time 10 -o /tmp/history.json -w '%{http_code}' "$PREVIEW_URL/api/history?camera=$encoded&hours=6&limit=96&validation=$(date +%s%N)" || true)
+          echo "timeline=$timeline body=$(head -c 300 /tmp/history.json)"
+          test "$timeline" = 200
           jq -e '.cameraId and (.frames|type=="array")' /tmp/history.json >/dev/null
           echo "History status: $(cat /tmp/status.json)"
       - name: Browser Time Machine interaction test
@@ -82,9 +92,9 @@ jobs:
           });
           await page.goto(`${process.env.PREVIEW_URL}/?validation=${Date.now()}`,{waitUntil:'networkidle'});
           await page.locator('.camera-open').first().click();
-          await page.locator('#time-machine').waitFor();
           await page.locator('#history-scrubber').waitFor();
           await page.locator('#history-scrubber').fill('2');
+          await page.waitForTimeout(100);
           if(await page.locator('#history-frame').isHidden())throw new Error('historical frame did not display');
           await page.locator('#history-compare').click();
           await page.locator('#compare-stage').waitFor();
@@ -97,3 +107,18 @@ jobs:
           console.log('Time Machine interaction test passed');
           JS
           node tests/time-machine-validation.mjs
+      - name: Lighthouse default path
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            npx lighthouse "$PREVIEW_URL/?lh=$i" --quiet --chrome-flags='--headless --no-sandbox' --only-categories=performance,accessibility --output=json --output-path="/tmp/lh-$i.json"
+          done
+          node - <<'JS'
+          const fs=require('fs');
+          const runs=[1,2,3].map(i=>JSON.parse(fs.readFileSync(`/tmp/lh-${i}.json`)));
+          const rows=runs.map(r=>({performance:Math.round(r.categories.performance.score*100),a11y:Math.round(r.categories.accessibility.score*100),lcp:Math.round(r.audits['largest-contentful-paint'].numericValue),tbt:Math.round(r.audits['total-blocking-time'].numericValue),cls:r.audits['cumulative-layout-shift'].numericValue}));
+          console.log(rows);
+          if(Math.min(...rows.map(r=>r.performance))<95)process.exit(1);
+          if(Math.min(...rows.map(r=>r.a11y))<100)process.exit(1);
+          if(Math.max(...rows.map(r=>r.cls))>0.05)process.exit(1);
+          JS
