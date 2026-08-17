@@ -64,13 +64,20 @@ jobs:
             sleep 3
           done
           test "$ready" -eq 1
+          echo "FULL_PULSE=$(jq -c . /tmp/pulse.json)"
+          echo "Pulse payload: $(jq -c '{pulseScore,state,activeCameras,camerasAnalyzed,top:(.items[:8]|map({cameraId,label,score,reason,transitions,samples,uniqueScenes,changedNow,ageMinutes}))}' /tmp/pulse.json)"
+          echo 'check: non-empty'
           jq -e '.camerasAnalyzed > 0 and (.items|length) > 0' /tmp/pulse.json >/dev/null
+          echo 'check: methodology'
           jq -e '.methodology | contains("does not infer crashes")' /tmp/pulse.json >/dev/null
+          echo 'check: item fields'
           jq -e 'all(.items[]; (.score >= 0 and .score <= 100 and .samples >= 2 and .transitions >= 0 and (.cameraId|length)>0 and (.reason|length)>0))' /tmp/pulse.json >/dev/null
+          echo 'check: descending scores'
           jq -e '[.items[].score] as $s | reduce range(1; $s|length) as $i (true; . and ($s[$i-1] >= $s[$i]))' /tmp/pulse.json >/dev/null
+          echo 'check: no incident claims'
           jq -e 'all(.items[].reason; (ascii_downcase|contains("crash")|not) and (ascii_downcase|contains("accident")|not) and (ascii_downcase|contains("congestion")|not))' /tmp/pulse.json >/dev/null
+          echo 'check: change evidence or truly quiet'
           jq -e 'any(.items[]; .transitions > 0) or (.pulseScore == 0)' /tmp/pulse.json >/dev/null
-          echo "Pulse payload: $(jq -c '{pulseScore,state,activeCameras,camerasAnalyzed,top:(.items[:5]|map({cameraId,label,score,reason,transitions,samples,uniqueScenes}))}' /tmp/pulse.json)"
       - name: Browser Pulse interaction test
         shell: bash
         run: |
