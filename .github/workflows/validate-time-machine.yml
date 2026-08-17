@@ -8,10 +8,9 @@ permissions:
   contents: read
 
 jobs:
-  validate-capture:
-    if: github.event.head_commit.message == 'Validate scheduled Time Machine capture'
+  cleanup-preview:
+    if: github.event.head_commit.message == 'Disable isolated Time Machine cron'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -19,70 +18,22 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: node --check prototype/vanilla/public/benchmark.js && npm run lint
-      - name: Build cron-enabled isolated config
+      - name: Redeploy benchmark worker without cron
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
         run: |
+          set -euo pipefail
           python - <<'PY'
           import json
           from pathlib import Path
           data=json.loads(Path('wrangler.jsonc').read_text())
           data['name']='hoxel-traffic-camera-vanilla-benchmark'
           data.pop('routes',None)
+          data.pop('triggers',None)
           data['workers_dev']=True
           data['preview_urls']=True
           Path('wrangler.preview.jsonc').write_text(json.dumps(data,indent=2)+'\n')
           PY
-      - name: Deploy cron-enabled isolated worker
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx wrangler deploy --config wrangler.preview.jsonc 2>&1 | tee /tmp/deploy.log
-          url=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/deploy.log | tail -1)
-          test -n "$url"
-          echo "PREVIEW_URL=$url" >> "$GITHUB_ENV"
-      - name: Wait for real scheduled capture
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          before=$(curl -fsSL "$PREVIEW_URL/api/history/status?v=$(date +%s%N)" | jq -r '.frames')
-          echo "frames before=$before"
-          captured=0
-          for i in {1..12}; do
-            sleep 15
-            curl -fsSL "$PREVIEW_URL/api/history/status?v=$(date +%s%N)" -o /tmp/status.json
-            frames=$(jq -r '.frames' /tmp/status.json)
-            cameras=$(jq -r '.cameras' /tmp/status.json)
-            echo "capture poll $i: frames=$frames cameras=$cameras"
-            if [ "$frames" -gt "$before" ] && [ "$cameras" -gt 0 ]; then captured=1; break; fi
-          done
-          test "$captured" -eq 1 || { echo 'No scheduled capture arrived'; cat /tmp/status.json; exit 1; }
-
-          npx wrangler d1 execute HISTORY_DB --remote --config wrangler.preview.jsonc --json --command \
-            "SELECT camera_id, r2_key, captured_at FROM camera_snapshots ORDER BY captured_at DESC LIMIT 1" > /tmp/latest.json
-          python - <<'PY'
-          import json
-          data=json.load(open('/tmp/latest.json'))
-          rows=[]
-          for result in data if isinstance(data,list) else [data]:
-              rows.extend(result.get('results',[]))
-          if not rows: raise SystemExit('No D1 history rows found')
-          row=rows[0]
-          open('/tmp/camera-id','w').write(row['camera_id'])
-          open('/tmp/r2-key','w').write(row['r2_key'])
-          print(row)
-          PY
-          camera=$(python -c 'import urllib.parse;print(urllib.parse.quote(open("/tmp/camera-id").read(),safe=""))')
-          key=$(python -c 'import urllib.parse;print(urllib.parse.quote(open("/tmp/r2-key").read(),safe=""))')
-          curl -fsSL "$PREVIEW_URL/api/history?camera=$camera&hours=6&limit=10&v=$(date +%s%N)" -o /tmp/timeline.json
-          jq -e '.frames | length > 0' /tmp/timeline.json >/dev/null
-          image_status=$(curl -sS --max-time 15 -o /tmp/history.webp -w '%{http_code}' "$PREVIEW_URL/api/history/image?key=$key")
-          test "$image_status" = 200
-          file /tmp/history.webp
-          test -s /tmp/history.webp
-          echo "Real D1/R2 scheduled capture validated: $(cat /tmp/status.json)"
+          npx wrangler deploy --config wrangler.preview.jsonc
