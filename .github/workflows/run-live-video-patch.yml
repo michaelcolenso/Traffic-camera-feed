@@ -1,0 +1,30 @@
+name: Run live video patch
+
+on:
+  push:
+    branches: [fix/live-video-feeds]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Run live video patch script'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/live-video-feeds
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: python .github/scripts/patch_live_video.py
+      - run: node --check prototype/vanilla/public/benchmark.js
+      - run: npm ci && npm run lint
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add prototype/vanilla/worker.ts prototype/vanilla/public/benchmark.js
+          git commit -m 'Fix live video playback and snapshot fallback'
+          git push origin HEAD:fix/live-video-feeds
