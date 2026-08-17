@@ -68,11 +68,15 @@ jobs:
         shell: bash
         run: |
           npx playwright install chromium --with-deps >/dev/null
-          cat > /tmp/video-test.mjs <<'JS'
+          cat > tests/video-fallback.mjs <<'JS'
           import { chromium } from 'playwright';
           const browser=await chromium.launch({headless:true});
           const page=await browser.newPage({viewport:{width:390,height:844}});
           const errors=[]; page.on('pageerror',e=>errors.push(String(e)));
+          await page.route('https://61e0c5d388c2e.streamlock.net/**',async route=>{
+            await new Promise(resolve=>setTimeout(resolve,1200));
+            await route.abort('failed');
+          });
           await page.goto(`${process.env.VANILLA_URL}/?validation=${Date.now()}`,{waitUntil:'networkidle'});
           const play=page.locator('[data-grid-play]').first();
           await play.click();
@@ -82,11 +86,11 @@ jobs:
           const label=(await play.locator('.play-label').textContent())?.trim();
           if (label !== 'Connecting') throw new Error(`expected Connecting, got ${label}`);
           await page.waitForTimeout(9000);
-          if (await img.isHidden()) throw new Error('snapshot remained hidden after failed stream');
+          if (await img.isHidden()) throw new Error('snapshot hidden after failed stream');
           const finalLabel=(await play.locator('.play-label').textContent())?.trim();
           if (finalLabel !== 'Play live') throw new Error(`expected snapshot fallback, got ${finalLabel}`);
           if (errors.length) throw new Error(errors.join('; '));
           await browser.close();
           console.log('snapshot-first playback regression passed');
           JS
-          node /tmp/video-test.mjs
+          node tests/video-fallback.mjs
