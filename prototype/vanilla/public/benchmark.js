@@ -763,3 +763,4 @@ $('#match-all').classList.toggle('active',collectionMode==='all');$('#match-any'
 refilter();setView(view);renderDiagnostics();renderPulse();
 queueMicrotask(()=>loadPulse(false));
 if (focusedId) queueMicrotask(()=>openFocus(focusedId));
+import('/phase2.js').catch(()=>{});
