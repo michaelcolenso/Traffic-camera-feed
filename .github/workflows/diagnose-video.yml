@@ -11,44 +11,30 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe official camera video URLs and candidate origins
+      - name: Trace official Travelers camera playback
         shell: bash
         run: |
           set -x
-          ARC='https://services.arcgis.com/ZOyb2t4B0UYuYNYH/ArcGIS/rest/services/Traffic_Cameras_CDL/FeatureServer/0/query?where=SERVSTAT%3D%27ACTV%27&outFields=NAME%2CLOCATION%2CSTREAM_NAME&returnGeometry=false&f=json'
-          curl -fsSL "$ARC" -o /tmp/cameras.json
+          curl -fsSL 'https://web.seattle.gov/travelers/' -o /tmp/travelers.html
+          echo '=== script sources ==='
           python - <<'PY'
-          import json
-          d=json.load(open('/tmp/cameras.json'))
-          names=[f.get('attributes',{}).get('STREAM_NAME') for f in d.get('features',[]) if f.get('attributes',{}).get('STREAM_NAME')]
-          print('ArcGIS sample:', [f.get('attributes') for f in d.get('features',[])[:5]])
-          print('FIRST_STREAM='+str(names[0] if names else ''))
-          open('/tmp/stream','w').write(names[0] if names else '')
+          from html.parser import HTMLParser
+          from urllib.parse import urljoin
+          class P(HTMLParser):
+              def __init__(self): super().__init__(); self.s=[]
+              def handle_starttag(self,t,a):
+                  if t=='script':
+                      d=dict(a)
+                      if d.get('src'): self.s.append(urljoin('https://web.seattle.gov/travelers/',d['src']))
+          p=P(); p.feed(open('/tmp/travelers.html',errors='ignore').read())
+          print('\n'.join(p.s))
+          open('/tmp/scripts','w').write('\n'.join(p.s))
           PY
-          echo '=== Socrata full video URLs ==='
-          curl -fsSL 'https://data.seattle.gov/resource/65fc-btcc.json?$limit=500' -o /tmp/socrata.json
-          python - <<'PY'
-          import json, urllib.parse, collections
-          rows=json.load(open('/tmp/socrata.json'))
-          urls=[]
-          for r in rows:
-              v=r.get('video_url') or r.get('video_url_1') or r.get('videourl')
-              if isinstance(v,dict): v=v.get('url')
-              if v: urls.append(v)
-          print('VIDEO_URL_COUNT',len(urls))
-          hosts=collections.Counter(urllib.parse.urlparse(u).hostname for u in urls)
-          print('VIDEO_HOSTS',hosts)
-          for u in urls[:10]: print('VIDEO',u)
-          PY
-          S=$(cat /tmp/stream)
-          test -n "$S"
-          for H in 61e0c5d388c2e.streamlock.net 58cc2dce193dd.streamlock.net; do
-            echo "=== $H ==="
-            rm -f /tmp/body
-            curl -k -sS -D - --max-time 12 -o /tmp/body "https://$H/live/$S.stream/playlist.m3u8" | head -30 || true
-            echo 'BODY:'; head -20 /tmp/body || true
-          done
-          echo '=== production proxy ==='
-          rm -f /tmp/proxy
-          curl -sS -D - --max-time 15 -o /tmp/proxy "https://cams.hoxel.dev/api/video?url=%2Flive%2F${S}.stream%2Fplaylist.m3u8" | head -30 || true
-          echo 'PROXY BODY:'; head -20 /tmp/proxy || true
+          while read -r U; do
+            [ -n "$U" ] || continue
+            echo "=== $U ==="
+            curl -fsSL --max-time 20 "$U" -o /tmp/js || continue
+            grep -Eio '.{0,100}(streamlock|m3u8|playlist\.m3u8|video[_A-Za-z]*url|STREAM_NAME).{0,180}' /tmp/js | head -100 || true
+          done < /tmp/scripts
+          echo '=== travelers html media clues ==='
+          grep -Eio '.{0,100}(streamlock|m3u8|video|camera).{0,180}' /tmp/travelers.html | head -100 || true
