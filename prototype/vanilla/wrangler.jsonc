@@ -10,6 +10,9 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
+  "images": {
+    "binding": "IMAGES"
+  },
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
