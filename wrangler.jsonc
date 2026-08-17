@@ -6,6 +6,11 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
@@ -23,5 +28,19 @@
       "/",
       "/api/*"
     ]
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "HISTORY_DB",
+      "database_name": "hoxel-traffic-camera-history",
+      "database_id": "4044309c-9326-4713-93eb-a5e5b47965f4",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "HISTORY_BUCKET",
+      "bucket_name": "hoxel-traffic-camera-history"
+    }
+  ]
 }

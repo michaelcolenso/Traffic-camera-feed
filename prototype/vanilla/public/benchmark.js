@@ -36,6 +36,9 @@ const analyzedSources = new Map();
 let anomalyQueueTimer = null;
 let anomalySaveTimer = null;
 let anomalyUiTimer = null;
+const historicalSeedAttempted = new Set();
+let focusHistory = null;
+let timelapseTimer = null;
 const ANOMALY_START_DELAY = 12000;
 
 const $ = (selector) => document.querySelector(selector);
@@ -194,10 +197,40 @@ function queueAnomalyAnalysis(camera,img) {
   const delay = Math.max(80, ANOMALY_START_DELAY - performance.now());
   anomalyQueueTimer = setTimeout(processAnomalyQueue,delay);
 }
+async function seedHistoricalBaseline(camera) {
+  const record=anomalyHistory[camera.id] || {samples:[]};
+  const existing=Array.isArray(record.samples)?record.samples:[];
+  if (existing.length>=ANOMALY_MIN_SAMPLES || historicalSeedAttempted.has(camera.id)) return;
+  historicalSeedAttempted.add(camera.id);
+  try {
+    const response=await fetch(`/api/history?camera=${encodeURIComponent(camera.id)}&hours=6&limit=4`,{headers:{Accept:'application/json'}});
+    if(!response.ok)return;
+    const data=await response.json();
+    const frames=Array.isArray(data.frames)?data.frames.slice(0,ANOMALY_MIN_SAMPLES):[];
+    const seeded=[];
+    for(const frame of frames){
+      const img=new Image();
+      img.decoding='async';
+      const loaded=new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;});
+      img.src=frame.imageUrl;
+      try{await loaded;const fp=fingerprintImage(img);if(fp)seeded.push(fp);}catch{}
+    }
+    if(seeded.length){
+      record.samples=[...seeded,...existing].slice(-ANOMALY_HISTORY_LIMIT);
+      record.updatedAt=Date.now();
+      anomalyHistory[camera.id]=record;
+      saveAnomalyHistory();
+    }
+  }catch{}
+}
 function analyzeImage(camera,img) {
+  const record=anomalyHistory[camera.id] || {samples:[]};
+  if ((record.samples?.length||0)<ANOMALY_MIN_SAMPLES && !historicalSeedAttempted.has(camera.id)) {
+    seedHistoricalBaseline(camera).finally(()=>analyzeImage(camera,img));
+    return;
+  }
   const current=fingerprintImage(img);
   if (!current) return;
-  const record=anomalyHistory[camera.id] || {samples:[]};
   const previous=Array.isArray(record.samples)?record.samples.slice(-ANOMALY_HISTORY_LIMIT):[];
   const baseline=baselineFor(previous);
   if (baseline && previous.length>=ANOMALY_MIN_SAMPLES) {
@@ -548,6 +581,79 @@ function setLiveGrid(enabled) {
   renderCollections();
 }
 
+function stopTimelapse(){
+  if(timelapseTimer){clearInterval(timelapseTimer);timelapseTimer=null;}
+  const button=$('#history-timelapse');if(button)button.textContent='Timelapse';
+}
+function timeLabel(timestamp){
+  const date=new Date(timestamp);
+  return date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+}
+function historyOverlay(){return $('#history-frame');}
+function hideComparison(){
+  $('#compare-stage')?.remove();
+  $('#compare-scrubber')?.closest('.compare-control')?.remove();
+}
+function showCurrentFocus(camera){
+  stopTimelapse();hideComparison();
+  const overlay=historyOverlay();if(overlay)overlay.hidden=true;
+  const label=$('#history-current-label');if(label)label.textContent='Now';
+  if(camera.videoUrl)setupVideo(camera);
+}
+function showHistoryFrame(camera,index){
+  if(!focusHistory||focusHistory.cameraId!==camera.id||!focusHistory.frames.length)return;
+  stopTimelapse();hideComparison();destroyVideo();
+  const frame=focusHistory.frames[Math.max(0,Math.min(index,focusHistory.frames.length-1))];
+  focusHistory.index=focusHistory.frames.indexOf(frame);
+  const overlay=historyOverlay();if(!overlay)return;
+  overlay.src=frame.imageUrl;overlay.hidden=false;
+  const scrub=$('#history-scrubber');if(scrub)scrub.value=String(focusHistory.index);
+  const label=$('#history-current-label');if(label)label.textContent=timeLabel(frame.capturedAt);
+}
+function showComparison(camera){
+  if(!focusHistory?.frames?.length)return;
+  stopTimelapse();destroyVideo();
+  const frame=focusHistory.frames[focusHistory.index]||focusHistory.frames.at(-1);
+  const media=$('.focus-media');if(!media)return;
+  const overlay=historyOverlay();if(overlay)overlay.hidden=true;
+  hideComparison();
+  media.insertAdjacentHTML('beforeend',`<div id="compare-stage" class="compare-stage"><img src="${imageUrl(camera,960,true)}" alt="${escapeHtml(camera.label)} now"><div class="compare-before"><img src="${frame.imageUrl}" alt="${escapeHtml(camera.label)} at ${timeLabel(frame.capturedAt)}"></div><span class="compare-label before">${timeLabel(frame.capturedAt)}</span><span class="compare-label now">Now</span><span class="compare-divider"></span></div>`);
+  const tm=$('#time-machine');
+  tm?.insertAdjacentHTML('beforeend','<label class="compare-control">Before / After <input id="compare-scrubber" type="range" min="5" max="95" value="50"></label>');
+  const slider=$('#compare-scrubber');
+  const apply=()=>{const value=Number(slider.value);const before=$('.compare-before');const divider=$('.compare-divider');if(before)before.style.width=`${value}%`;if(divider)divider.style.left=`${value}%`;};
+  slider?.addEventListener('input',apply);apply();
+}
+function startTimelapse(camera){
+  if(!focusHistory?.frames?.length)return;
+  if(timelapseTimer){stopTimelapse();return;}
+  hideComparison();destroyVideo();
+  let index=0;
+  const button=$('#history-timelapse');if(button)button.textContent='Stop timelapse';
+  const advance=()=>{const overlay=historyOverlay();const frame=focusHistory.frames[index];if(!overlay||!frame){stopTimelapse();return;}overlay.src=frame.imageUrl;overlay.hidden=false;focusHistory.index=index;const scrub=$('#history-scrubber');if(scrub)scrub.value=String(index);const label=$('#history-current-label');if(label)label.textContent=timeLabel(frame.capturedAt);index+=1;if(index>=focusHistory.frames.length)stopTimelapse();};
+  advance();timelapseTimer=setInterval(advance,260);
+}
+async function loadTimeMachine(camera){
+  focusHistory={cameraId:camera.id,frames:[],index:0};
+  const section=$('#time-machine');if(!section)return;
+  try{
+    const response=await fetch(`/api/history?camera=${encodeURIComponent(camera.id)}&hours=6&limit=96`,{headers:{Accept:'application/json'}});
+    if(!response.ok)throw new Error('history unavailable');
+    const data=await response.json();const frames=Array.isArray(data.frames)?data.frames:[];
+    if(focusedId!==camera.id)return;
+    focusHistory={cameraId:camera.id,frames,index:Math.max(0,frames.length-1)};
+    if(!frames.length){section.innerHTML='<div class="time-machine-empty"><strong>Traffic Time Machine</strong><span>History is warming up. New frames arrive about every five minutes.</span></div>';return;}
+    const first=timeLabel(frames[0].capturedAt),last=timeLabel(frames.at(-1).capturedAt);
+    section.innerHTML=`<div class="time-machine-head"><div><p class="eyebrow">Traffic Time Machine</p><strong id="history-current-label">Now</strong></div><span>${frames.length} captures · ${first}–${last}</span></div><input id="history-scrubber" class="history-scrubber" type="range" min="0" max="${frames.length-1}" value="${frames.length-1}" aria-label="Historical camera time"><div class="time-machine-actions"><button id="history-now" class="chip accent">Now</button><button id="history-compare" class="chip">Before / After</button><button id="history-timelapse" class="chip">Timelapse</button></div>`;
+    $('#history-scrubber')?.addEventListener('input',(event)=>showHistoryFrame(camera,Number(event.target.value)));
+    $('#history-now')?.addEventListener('click',()=>showCurrentFocus(camera));
+    $('#history-compare')?.addEventListener('click',()=>showComparison(camera));
+    $('#history-timelapse')?.addEventListener('click',()=>startTimelapse(camera));
+  }catch{
+    if(focusedId===camera.id)section.innerHTML='<div class="time-machine-empty"><strong>Traffic Time Machine</strong><span>Historical frames are temporarily unavailable.</span></div>';
+  }
+}
+
 function openFocus(id) {
   const camera=cameraById(id); if (!camera) return;
   destroyVideo(); focusedId=id; updateUrl();
@@ -555,12 +661,14 @@ function openFocus(id) {
   const nearby=nearest(camera).map((c)=>`<button class="nearby-camera" data-focus="${escapeHtml(c.id)}">${escapeHtml(c.label)}</button>`).join('');
   const state=anomalyState(camera);
   const anomalyCopy=state&&state.samples>=ANOMALY_MIN_SAMPLES?`<p class="sub">Visual change score ${state.score}/100 · ${escapeHtml(state.reason)}</p>`:'';
-  modalBody.innerHTML=`<div class="focus-head"><p class="eyebrow">Camera focus</p><h2>${escapeHtml(camera.label)}</h2>${anomalyCopy}</div><div class="focus-media">${camera.videoUrl?`<video id="focus-video" controls playsinline poster="${imageUrl(camera,960,true)}"></video>`:`<img src="${imageUrl(camera,960,true)}" alt="${escapeHtml(camera.label)}" width="960" height="540">`}</div><div class="focus-actions"><button class="chip" data-focus="${escapeHtml(prev?.id||id)}">← Previous</button><button id="refresh-focus" class="chip">Refresh snapshot</button><button class="chip" data-focus="${escapeHtml(next?.id||id)}">Next →</button>${camera.webUrl?`<a class="chip" href="${escapeHtml(camera.webUrl)}" target="_blank" rel="noopener noreferrer">SDOT page</a>`:''}</div>${nearby?`<div class="nearby"><p>Nearby cameras</p>${nearby}</div>`:''}`;
+  modalBody.innerHTML=`<div class="focus-head"><p class="eyebrow">Camera focus</p><h2>${escapeHtml(camera.label)}</h2>${anomalyCopy}</div><div class="focus-media">${camera.videoUrl?`<video id="focus-video" controls playsinline poster="${imageUrl(camera,960,true)}"></video>`:`<img src="${imageUrl(camera,960,true)}" alt="${escapeHtml(camera.label)}" width="960" height="540">`}<img id="history-frame" class="history-frame" hidden alt="Historical frame for ${escapeHtml(camera.label)}"></div><section id="time-machine" class="time-machine" aria-live="polite"><div class="time-machine-empty"><strong>Traffic Time Machine</strong><span>Loading recent history…</span></div></section><div class="focus-actions"><button class="chip" data-focus="${escapeHtml(prev?.id||id)}">← Previous</button><button id="refresh-focus" class="chip">Refresh snapshot</button><button class="chip" data-focus="${escapeHtml(next?.id||id)}">Next →</button>${camera.webUrl?`<a class="chip" href="${escapeHtml(camera.webUrl)}" target="_blank" rel="noopener noreferrer">SDOT page</a>`:''}</div>${nearby?`<div class="nearby"><p>Nearby cameras</p>${nearby}</div>`:''}`;
   if (!modal.open) modal.showModal();
   $('#refresh-focus')?.addEventListener('click',()=>{const media=$('#focus-video')||modalBody.querySelector('img');if(media){if(media.tagName==='IMG')media.src=imageUrl(camera,960,true);else media.poster=imageUrl(camera,960,true);}});
   if (camera.videoUrl) setupVideo(camera);
+  loadTimeMachine(camera);
 }
-function closeFocus() { destroyVideo();focusedId=null;updateUrl();modal.close(); }
+
+function closeFocus() { stopTimelapse();focusHistory=null;destroyVideo();focusedId=null;updateUrl();modal.close(); }
 
 grid.addEventListener('click',(event)=>{
   const play=event.target.closest('[data-grid-play]');
@@ -574,7 +682,7 @@ grid.addEventListener('click',(event)=>{
   const button=event.target.closest('.camera-open');if(button)openFocus(button.dataset.camera);
 });
 modalBody.addEventListener('click',(event)=>{const button=event.target.closest('[data-focus]');if(button)openFocus(button.dataset.focus);});
-close.addEventListener('click',closeFocus);modal.addEventListener('click',(event)=>{if(event.target===modal)closeFocus();});modal.addEventListener('close',()=>{destroyVideo();focusedId=null;updateUrl();});
+close.addEventListener('click',closeFocus);modal.addEventListener('click',(event)=>{if(event.target===modal)closeFocus();});modal.addEventListener('close',()=>{stopTimelapse();focusHistory=null;destroyVideo();focusedId=null;updateUrl();});
 search.addEventListener('input',refilter);
 collectionsEl.addEventListener('click',(event)=>{
   const button=event.target.closest('button');if(!button)return;
