@@ -11,15 +11,22 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
-      - name: Inspect official Travelers video module
+      - name: Trace official Travelers Wowza URL resolver
         shell: bash
         run: |
           set -euo pipefail
-          for U in \
-            'https://web.seattle.gov/Travelers/js/camera.video.js' \
-            'https://web.seattle.gov/Travelers/js/config.js' \
-            'https://web.seattle.gov/Travelers/js/view.mapmain.js' \
-            'https://web.seattle.gov/Travelers/js/view.index.js'; do
-            echo "===== $U ====="
-            curl -fsSL --max-time 20 "$U" | sed -n '1,500p'
+          curl -fsSL --max-time 20 'https://web.seattle.gov/Travelers/js/utils.js' -o /tmp/utils.js
+          echo '===== getWowsaUrl context ====='
+          grep -n -A25 -B15 -Ei 'getWowsaUrl|Wowsa|wowza' /tmp/utils.js || true
+          echo '===== API/config calls in utils ====='
+          grep -n -E -A8 -B4 'api/|ajax|Config|config' /tmp/utils.js | head -500 || true
+          echo '===== Travelers API candidates ====='
+          for P in \
+            'api/Map/GetWowsaUrl' \
+            'api/Map/GetWowzaUrl' \
+            'api/Map/GetConfig' \
+            'api/Map/GetConfiguration'; do
+            echo "--- $P ---"
+            curl -sS -D - --max-time 15 -o /tmp/body "https://web.seattle.gov/Travelers/$P" | head -25 || true
+            head -20 /tmp/body || true
           done
