@@ -1,0 +1,72 @@
+name: Final3 Validate Seattle Pulse
+
+on:
+  push:
+    branches: [feature/seattle-pulse]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.event.head_commit.message == 'Validate Seattle Pulse UI and performance'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PREVIEW_URL: https://hoxel-traffic-camera-pulse-benchmark.aged-morning-c8e4.workers.dev
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Confirm current Pulse API
+        run: |
+          curl -fsSL "$PREVIEW_URL/api/pulse?window=60&limit=12&v=$(date +%s%N)" -o /tmp/pulse.json
+          jq -e '.activeCameras > 0 and .camerasAnalyzed > 0 and any(.items[]; .transitions > 0)' /tmp/pulse.json >/dev/null
+          echo "PULSE=$(jq -c '{pulseScore,state,activeCameras,camerasAnalyzed}' /tmp/pulse.json)"
+      - name: Validate visible Pulse UI with system Chrome
+        shell: bash
+        run: |
+          npm install --no-save playwright >/dev/null
+          CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)
+          test -n "$CHROME"
+          mkdir -p tests
+          cat > tests/pulse-ui-final.mjs <<'JS'
+          import { chromium } from 'playwright';
+          const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME,args:['--no-sandbox']});
+          const page=await browser.newPage({viewport:{width:390,height:844}});
+          const errors=[]; page.on('pageerror',e=>errors.push(String(e)));
+          await page.goto(`${process.env.PREVIEW_URL}/?pulse_ui=${Date.now()}`,{waitUntil:'networkidle'});
+          const pulse=page.locator('#pulse');
+          const heading=pulse.locator('.pulse-head .eyebrow');
+          await heading.waitFor({state:'visible',timeout:15000});
+          const headingText=(await heading.textContent())?.trim();
+          if(headingText!=='Seattle Pulse') throw new Error(`Unexpected Pulse heading: ${headingText}`);
+          const card=pulse.locator('.pulse-card').first();
+          await card.waitFor({state:'visible'});
+          const score=await card.locator('.pulse-score').textContent();
+          if(!/^\d+$/.test((score||'').trim())) throw new Error('Pulse score missing');
+          await card.click();
+          await page.locator('#modal[open]').waitFor({state:'visible'});
+          await page.locator('#time-machine').waitFor({state:'visible'});
+          if(errors.length) throw new Error(errors.join('; '));
+          await browser.close();
+          console.log('Seattle Pulse visible UI + Focus/Time Machine interaction passed');
+          JS
+          CHROME="$CHROME" node tests/pulse-ui-final.mjs
+      - name: Lighthouse three-run gate
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            npx lighthouse "$PREVIEW_URL/?lh=$i" --quiet --chrome-flags='--headless --no-sandbox' --only-categories=performance,accessibility --output=json --output-path="/tmp/lh-$i.json"
+          done
+          node - <<'JS'
+          const fs=require('fs');
+          const rows=[1,2,3].map(i=>{const r=JSON.parse(fs.readFileSync(`/tmp/lh-${i}.json`));return {performance:Math.round(r.categories.performance.score*100),a11y:Math.round(r.categories.accessibility.score*100),lcp:Math.round(r.audits['largest-contentful-paint'].numericValue),tbt:Math.round(r.audits['total-blocking-time'].numericValue),cls:r.audits['cumulative-layout-shift'].numericValue};});
+          console.log('LIGHTHOUSE='+JSON.stringify(rows));
+          if(Math.min(...rows.map(r=>r.performance))<95) process.exit(1);
+          if(Math.min(...rows.map(r=>r.a11y))<100) process.exit(1);
+          if(Math.max(...rows.map(r=>r.cls))>0.05) process.exit(1);
+          JS
