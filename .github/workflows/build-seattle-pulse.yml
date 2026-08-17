@@ -1,0 +1,48 @@
+name: Build Seattle Pulse
+
+on:
+  push:
+    branches: [feature/seattle-pulse]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.event.head_commit.message == 'Run Seattle Pulse implementation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Repair builder transport typo
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/apply-seattle-pulse.mjs')
+          s=p.read_text()
+          s=s.replace('history=${history_status}, pulse=${pulse_status}\\\"");', 'history=${history_status}, pulse=${pulse_status}\\\"\");')
+          p.write_text(s)
+          PY
+          node --check scripts/apply-seattle-pulse.mjs
+      - name: Apply Seattle Pulse
+        run: |
+          node scripts/apply-seattle-pulse.mjs
+          git checkout -- .github/workflows/deploy-cloudflare.yml
+      - name: Validate
+        run: |
+          node --check prototype/vanilla/public/benchmark.js
+          npm run lint
+          npx wrangler types /tmp/pulse-worker-types.d.ts --config wrangler.jsonc
+          grep -q HISTORY_DB /tmp/pulse-worker-types.d.ts
+      - name: Commit product code
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add prototype/vanilla/pulse.ts prototype/vanilla/worker.ts prototype/vanilla/public/benchmark.js prototype/vanilla/public/benchmark.css
+          git commit -m 'Implement Seattle Pulse ranking and UI'
+          git push
