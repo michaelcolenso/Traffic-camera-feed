@@ -60,8 +60,13 @@ function enhancePulse() {
     if (copy) {
       const persistence = observation.persistenceSamples >= 2 ? ` · ${observation.persistenceSamples} captures` : '';
       const confidence = confidenceLabel(observation.confidence);
-      copy.innerHTML = `${escapeHtml(observation.display?.headline || observation.reason)} · ${escapeHtml(relativeTime(observation.capturedAt))}${escapeHtml(persistence)}${confidence ? ` <span class="phase2-confidence">${escapeHtml(confidence)}</span>` : ''} · <span class="phase2-evidence">Open evidence →</span>`;
-      copy.title = observation.display?.detail || observation.reason || '';
+      const markup = `${escapeHtml(observation.display?.headline || observation.reason)} · ${escapeHtml(relativeTime(observation.capturedAt))}${escapeHtml(persistence)}${confidence ? ` <span class="phase2-confidence">${escapeHtml(confidence)}</span>` : ''} · <span class="phase2-evidence">Open evidence →</span>`;
+      const signature = `${observation.capturedAt}:${observation.state}:${observation.severity}:${observation.confidence}:${observation.persistenceSamples}:${observation.display?.headline || observation.reason}`;
+      if (copy.dataset.phase2Signature !== signature) {
+        copy.dataset.phase2Signature = signature;
+        copy.innerHTML = markup;
+        copy.title = observation.display?.detail || observation.reason || '';
+      }
     }
     const score = card.querySelector('.pulse-score');
     if (score) score.title = `${observation.display?.detail || observation.reason}. Score is secondary to the observation evidence.`;
@@ -79,7 +84,11 @@ function enhancePulse() {
     const rail = pulse.querySelector('.pulse-rail');
     rail?.parentNode?.insertBefore(events, rail);
   }
-  events.innerHTML = pulseEvents.slice(0, 4).map((event) => `<div class="phase2-event"><strong>${escapeHtml(event.title)}</strong><span>${escapeHtml(event.detail)} · ${escapeHtml(event.confidence)} confidence</span></div>`).join('');
+  const eventMarkup = pulseEvents.slice(0, 4).map((event) => `<div class="phase2-event"><strong>${escapeHtml(event.title)}</strong><span>${escapeHtml(event.detail)} · ${escapeHtml(event.confidence)} confidence</span></div>`).join('');
+  if (events.dataset.phase2Markup !== eventMarkup) {
+    events.dataset.phase2Markup = eventMarkup;
+    events.innerHTML = eventMarkup;
+  }
 }
 
 async function loadPhase2Pulse(force = false) {

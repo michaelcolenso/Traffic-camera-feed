@@ -138,11 +138,17 @@ function baselineFingerprint(rows: SnapshotRow[]): { pixels: number[]; mean: num
   const length = usable[0].pixels.length;
   if (!length || usable.some((item) => item.pixels.length !== length)) return null;
   const pixels = Array.from({ length }, (_, index) => median(usable.map((item) => item.pixels[index])));
+  const mean = median(usable.map((item) => Number(item.row.mean_luma) || 0));
+  const contrast = median(usable.map((item) => Number(item.row.visual_contrast) || 0));
+  const representative = usable.reduce((best, item) => {
+    const distance = item.pixels.reduce((sum, value, index) => sum + Math.abs(value - pixels[index]), 0);
+    return !best || distance < best.distance ? { row: item.row, distance } : best;
+  }, null as { row: SnapshotRow; distance: number } | null);
   return {
     pixels,
-    mean: median(usable.map((item) => Number(item.row.mean_luma) || 0)),
-    contrast: median(usable.map((item) => Number(item.row.visual_contrast) || 0)),
-    row: usable[Math.floor(usable.length / 2)].row,
+    mean,
+    contrast,
+    row: representative?.row ?? usable[0].row,
   };
 }
 
@@ -178,7 +184,7 @@ function severityBand(value: number): Severity {
 function deriveObservation(rows: SnapshotRow[], now: number, windowMinutes: number): Observation | null {
   if (rows.length < 2) return null;
   const latest = rows[rows.length - 1];
-  const transitions = rows.reduce((sum, row) => sum + (row.is_duplicate ? 0 : 1), 0);
+  const transitions = rows.slice(1).reduce((sum, row, index) => sum + (row.sha256 !== rows[index].sha256 ? 1 : 0), 0);
   const uniqueScenes = new Set(rows.map((row) => row.sha256)).size;
   const transitionRate = rows.length ? transitions / rows.length : 0;
   const corridor = corridorWeight(latest.camera_label || '');
@@ -186,7 +192,9 @@ function deriveObservation(rows: SnapshotRow[], now: number, windowMinutes: numb
   const freshness = Math.max(0, 1 - ageMinutes / 20);
 
   const visualRows = rows.filter((row) => row.visual_fingerprint);
-  const baselineRows = visualRows.length >= 6 ? visualRows.slice(0, Math.max(3, visualRows.length - 3)) : visualRows.slice(0, 3);
+  const recentCount = Math.min(4, Math.max(0, visualRows.length - 3));
+  const baselineRows = recentCount > 0 ? visualRows.slice(0, -recentCount) : visualRows;
+  const recent = recentCount > 0 ? visualRows.slice(-recentCount) : [];
   const baseline = baselineFingerprint(baselineRows);
 
   if (!baseline) {
@@ -230,7 +238,6 @@ function deriveObservation(rows: SnapshotRow[], now: number, windowMinutes: numb
     };
   }
 
-  const recent = visualRows.slice(-4);
   const comparisons = recent.map((row) => ({ row, metrics: compareFrame(row, baseline) }));
   const changed = comparisons.map((item) => isMeaningfulChange(item.metrics));
   let persistenceSamples = 0;
