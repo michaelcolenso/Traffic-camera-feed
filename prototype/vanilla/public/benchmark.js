@@ -36,7 +36,7 @@ const analyzedSources = new Map();
 let anomalyQueueTimer = null;
 let anomalySaveTimer = null;
 let anomalyUiTimer = null;
-const ANOMALY_START_DELAY = 4000;
+const ANOMALY_START_DELAY = 12000;
 
 const $ = (selector) => document.querySelector(selector);
 const grid = $('#grid');
