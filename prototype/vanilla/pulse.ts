@@ -128,7 +128,7 @@ export async function handlePulseRequest(request: Request, url: URL, env: PulseB
   `).bind(cutoff).all<PulseRow>();
   const all = (result.results ?? []).map((row) => scoreRow(row, now)).sort((a, b) => b.score - a.score || b.transitions - a.transitions || b.capturedAt - a.capturedAt);
   const items = all.slice(0, limit);
-  const active = all.filter((item) => item.score >= 25).length;
+  const active = all.filter((item) => item.score >= 20).length;
   const top = all.slice(0, Math.min(10, all.length));
   const pulseScore = top.length ? Math.round(top.reduce((sum, item) => sum + item.score, 0) / top.length) : 0;
   const state = pulseScore >= 60 ? 'high activity' : pulseScore >= 35 ? 'active' : pulseScore >= 15 ? 'some movement' : 'quiet';
