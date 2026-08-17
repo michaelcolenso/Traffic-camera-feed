@@ -11,30 +11,15 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
-      - name: Trace official Travelers camera playback
+      - name: Inspect official Travelers video module
         shell: bash
         run: |
-          set -x
-          curl -fsSL 'https://web.seattle.gov/travelers/' -o /tmp/travelers.html
-          echo '=== script sources ==='
-          python - <<'PY'
-          from html.parser import HTMLParser
-          from urllib.parse import urljoin
-          class P(HTMLParser):
-              def __init__(self): super().__init__(); self.s=[]
-              def handle_starttag(self,t,a):
-                  if t=='script':
-                      d=dict(a)
-                      if d.get('src'): self.s.append(urljoin('https://web.seattle.gov/travelers/',d['src']))
-          p=P(); p.feed(open('/tmp/travelers.html',errors='ignore').read())
-          print('\n'.join(p.s))
-          open('/tmp/scripts','w').write('\n'.join(p.s))
-          PY
-          while read -r U; do
-            [ -n "$U" ] || continue
-            echo "=== $U ==="
-            curl -fsSL --max-time 20 "$U" -o /tmp/js || continue
-            grep -Eio '.{0,100}(streamlock|m3u8|playlist\.m3u8|video[_A-Za-z]*url|STREAM_NAME).{0,180}' /tmp/js | head -100 || true
-          done < /tmp/scripts
-          echo '=== travelers html media clues ==='
-          grep -Eio '.{0,100}(streamlock|m3u8|video|camera).{0,180}' /tmp/travelers.html | head -100 || true
+          set -euo pipefail
+          for U in \
+            'https://web.seattle.gov/Travelers/js/camera.video.js' \
+            'https://web.seattle.gov/Travelers/js/config.js' \
+            'https://web.seattle.gov/Travelers/js/view.mapmain.js' \
+            'https://web.seattle.gov/Travelers/js/view.index.js'; do
+            echo "===== $U ====="
+            curl -fsSL --max-time 20 "$U" | sed -n '1,500p'
+          done
