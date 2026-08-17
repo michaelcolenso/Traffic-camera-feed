@@ -1,0 +1,49 @@
+name: Fix Phase 2 audit findings
+
+on:
+  push:
+    branches:
+      - agent/what-changed-phase-2
+    paths:
+      - scripts/fix-phase2-audit.py
+      - .github/workflows/fix-phase2-audit.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/what-changed-phase-2
+          fetch-depth: 0
+      - name: Apply audit fixes
+        run: python scripts/fix-phase2-audit.py
+      - name: Remove temporary audit tooling
+        run: git rm scripts/fix-phase2-audit.py .github/workflows/fix-phase2-audit.yml
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: TypeScript check
+        run: npm run lint
+      - name: Validate Worker configuration
+        run: |
+          npx wrangler types /tmp/phase2-worker-configuration.d.ts --config prototype/vanilla/wrangler.jsonc
+          test -s /tmp/phase2-worker-configuration.d.ts
+          grep -q 'IMAGES' /tmp/phase2-worker-configuration.d.ts
+      - name: Browser syntax checks
+        run: |
+          node --check prototype/vanilla/public/benchmark.js
+          node --check prototype/vanilla/public/phase2.js
+      - name: Commit audited candidate
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Phase 2 audit findings"
+          git push origin HEAD:agent/what-changed-phase-2
