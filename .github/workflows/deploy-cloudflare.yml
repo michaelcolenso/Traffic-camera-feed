@@ -15,9 +15,9 @@ concurrency:
 
 jobs:
   deploy:
-    name: Validate, deploy, and smoke test
+    name: Validate, migrate, deploy, and smoke test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -39,6 +39,8 @@ jobs:
         run: |
           npx wrangler types worker-configuration.d.ts --config wrangler.jsonc
           test -s worker-configuration.d.ts
+          grep -q 'HISTORY_DB' worker-configuration.d.ts
+          grep -q 'HISTORY_BUCKET' worker-configuration.d.ts
 
       - name: Verify Cloudflare credentials
         env:
@@ -47,6 +49,12 @@ jobs:
         run: |
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing CLOUDFLARE_ACCOUNT_ID repository secret"; exit 1; }
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN repository secret"; exit 1; }
+
+      - name: Apply D1 migrations
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx wrangler d1 migrations apply HISTORY_DB --remote --config wrangler.jsonc
 
       - name: Deploy cams.hoxel.dev
         uses: cloudflare/wrangler-action@v3
@@ -65,18 +73,20 @@ jobs:
             home_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-home -w '%{http_code}' https://cams.hoxel.dev/ || true)"
             js_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-js -w '%{http_code}' https://cams.hoxel.dev/benchmark.js || true)"
             api_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-cameras -w '%{http_code}' 'https://cams.hoxel.dev/api/cameras?source=arcgis' || true)"
-            echo "Production readiness ${attempt}/12: home=${home_status}, js=${js_status}, cameras=${api_status}"
-            if [ "$home_status" = "200" ] && [ "$js_status" = "200" ] && [ "$api_status" = "200" ] \
+            history_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-history -w '%{http_code}' https://cams.hoxel.dev/api/history/status || true)"
+            echo "Production readiness ${attempt}/12: home=${home_status}, js=${js_status}, cameras=${api_status}, history=${history_status}"
+            if [ "$home_status" = "200" ] && [ "$js_status" = "200" ] && [ "$api_status" = "200" ] && [ "$history_status" = "200" ] \
               && grep -q 'Seattle Traffic Watch' /tmp/cams-home \
               && grep -q 'window.__CAMERAS__=' /tmp/cams-home \
               && grep -q 'data-collection="live"' /tmp/cams-home \
-              && jq -e 'type == "array" and length > 0' /tmp/cams-cameras >/dev/null; then
+              && jq -e 'type == "array" and length > 0' /tmp/cams-cameras >/dev/null \
+              && jq -e 'has("frames") and has("cameras") and has("latest")' /tmp/cams-history >/dev/null; then
               home_ok=1
               break
             fi
             sleep 5
           done
-          test "$home_ok" -eq 1 || { echo "cams.hoxel.dev did not become healthy"; head -c 1000 /tmp/cams-home || true; exit 1; }
+          test "$home_ok" -eq 1 || { echo "cams.hoxel.dev did not become healthy"; cat /tmp/cams-history || true; exit 1; }
 
           video_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-video -w '%{http_code}' https://cams.hoxel.dev/api/video)"
           test "$video_status" = "400" || { echo "Expected /api/video without a URL to return 400, got ${video_status}"; cat /tmp/cams-video; exit 1; }
@@ -87,12 +97,19 @@ jobs:
           grep -q 'Bad image path' /tmp/cams-image || { echo "Unexpected /api/image response body"; cat /tmp/cams-image; exit 1; }
 
           first_image_path="$(jq -r '.[0].imagePath // empty' /tmp/cams-cameras)"
+          first_camera_id="$(jq -r '.[0].id // empty' /tmp/cams-cameras)"
           test -n "$first_image_path" || { echo "Camera payload did not include an imagePath"; exit 1; }
+          test -n "$first_camera_id" || { echo "Camera payload did not include an id"; exit 1; }
           encoded_image_path="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$first_image_path")"
+          encoded_camera_id="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$first_camera_id")"
           transformed_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-transformed -w '%{http_code}' "https://cams.hoxel.dev/api/image?path=${encoded_image_path}&w=480")"
           test "$transformed_status" = "200" || { echo "Expected transformed camera image to return 200, got ${transformed_status}"; exit 1; }
 
-          echo "Core production smoke test passed: edge-rendered app, camera data, video route, and image transform are healthy"
+          timeline_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-timeline -w '%{http_code}' "https://cams.hoxel.dev/api/history?camera=${encoded_camera_id}&hours=6&limit=96")"
+          test "$timeline_status" = "200" || { echo "Expected history timeline API to return 200, got ${timeline_status}"; cat /tmp/cams-timeline || true; exit 1; }
+          jq -e '.cameraId and (.frames | type == "array")' /tmp/cams-timeline >/dev/null || { echo "History timeline payload invalid"; cat /tmp/cams-timeline; exit 1; }
+
+          echo "Core production smoke test passed: app, cameras, images, D1/R2 history API, and timeline endpoint are healthy"
 
           # Live HLS is an external dependency. Probe several current streams for visibility,
           # but do not fail a healthy deployment when Seattle's streaming origin is unavailable.
