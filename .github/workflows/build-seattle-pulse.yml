@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   build:
-    if: github.event.head_commit.message == 'Run Seattle Pulse implementation v2'
+    if: github.event.head_commit.message == 'Run Seattle Pulse implementation v3'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -19,21 +19,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Repair builder transport escaping
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('scripts/apply-seattle-pulse.mjs')
-          s=p.read_text()
-          s=s.replace('reason = `Change on ${corridor.corridor}`;', "reason = 'Change on ' + corridor.corridor;")
-          s=s.replace('history=${history_status}, pulse=${pulse_status}\\\"");', 'history=${history_status}, pulse=${pulse_status}\\\"\");')
-          p.write_text(s)
-          PY
-          node --check scripts/apply-seattle-pulse.mjs
       - name: Apply Seattle Pulse
-        run: |
-          node scripts/apply-seattle-pulse.mjs
-          git checkout -- .github/workflows/deploy-cloudflare.yml
+        run: python scripts/apply-seattle-pulse.py
       - name: Validate
         run: |
           node --check prototype/vanilla/public/benchmark.js
