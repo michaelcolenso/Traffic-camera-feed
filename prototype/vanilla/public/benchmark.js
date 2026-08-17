@@ -423,15 +423,25 @@ function nearest(camera, limit = 4) {
   if (!Number.isFinite(camera.lat)||!Number.isFinite(camera.lng)) return [];
   return cameras.filter((c)=>c.id!==camera.id&&Number.isFinite(c.lat)&&Number.isFinite(c.lng)).map((c)=>({c,d:Math.hypot(c.lat-camera.lat,c.lng-camera.lng)})).sort((a,b)=>a.d-b.d).slice(0,limit).map((x)=>x.c);
 }
+function preferredVideoUrl(camera) {
+  return camera.directVideoUrl || camera.videoUrl;
+}
+function withTimeout(promise, ms, message = 'Video connection timed out') {
+  let timer;
+  const timeout = new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(message)),ms);});
+  return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer));
+}
 async function attachHls(video, camera, onFatal) {
+  const source = preferredVideoUrl(camera);
+  if (!source) throw new Error('No video source');
   if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = camera.videoUrl;
+    video.src = source;
     return null;
   }
   await ensureHlsScript();
   if (!window.Hls?.isSupported()) throw new Error('HLS playback is not supported');
   const instance = new Hls({enableWorker:true,lowLatencyMode:false});
-  instance.loadSource(camera.videoUrl);
+  instance.loadSource(source);
   instance.attachMedia(video);
   instance.on(Hls.Events.ERROR,(_event,data)=>{if(data.fatal)onFatal?.(data);});
   return instance;
@@ -452,6 +462,7 @@ function updateGridPlayerUi(id, playing) {
   const button = card.querySelector('[data-grid-play]');
   const badge = card.querySelector('.live-badge');
   if (button) {
+    button.classList.remove('is-connecting');
     button.classList.toggle('is-playing',playing);
     button.setAttribute('aria-label',`${playing?'Stop':'Play'} live video for ${cameraById(id)?.label || 'camera'}`);
     button.querySelector('.play-icon').textContent = playing ? '■' : '▶';
@@ -494,13 +505,22 @@ async function startGridVideo(id, mode = 'manual') {
   video.poster = imageUrl(camera,480,true);
   video.setAttribute('aria-label',`Live video for ${camera.label}`);
   shell.insertBefore(video,img);
-  img.hidden = true;
-  updateGridPlayerUi(id,true);
   const player = {video,hls:null,mode};
   gridPlayers.set(id,player);
+  const button = card.querySelector('[data-grid-play]');
+  if (button) {
+    button.classList.add('is-connecting');
+    button.querySelector('.play-icon').textContent = '…';
+    button.querySelector('.play-label').textContent = 'Connecting';
+    button.setAttribute('aria-label',`Connecting live video for ${camera.label}`);
+  }
   try {
     player.hls = await attachHls(video,camera,()=>{noteHealth(camera,'stream-error');stopGridVideo(id);});
-    await video.play();
+    await withTimeout(video.play(),8000);
+    if (!gridPlayers.has(id)) return;
+    img.hidden = true;
+    if (button) button.classList.remove('is-connecting');
+    updateGridPlayerUi(id,true);
   } catch {
     noteHealth(camera,'stream-error');
     stopGridVideo(id);

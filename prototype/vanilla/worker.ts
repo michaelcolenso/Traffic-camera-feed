@@ -1,6 +1,8 @@
 const DEFAULT_FEATURE_SERVICE = 'https://services.arcgis.com/ZOyb2t4B0UYuYNYH/ArcGIS/rest/services/Traffic_Cameras_CDL/FeatureServer/0';
 const SDOT_ENDPOINT = 'https://data.seattle.gov/resource/65fc-btcc.json';
 const VIDEO_SERVER = '61e0c5d388c2e.streamlock.net';
+const VIDEO_ORIGIN = `https://${VIDEO_SERVER}:443`;
+const VIDEO_FETCH_TIMEOUT_MS = 7000;
 const CAMERA_HOST = 'www.seattle.gov';
 const CAMERA_PREFIX = '/trafficcams/images/';
 
@@ -10,6 +12,7 @@ type Camera = {
   imagePath: string;
   stream?: string;
   videoUrl?: string;
+  directVideoUrl?: string;
   webUrl?: string;
   lat?: number;
   lng?: number;
@@ -70,7 +73,8 @@ function normalizeArcGIS(data: ArcResponse): Camera[] {
       imagePath,
       stream,
       videoUrl: stream ? `/api/video?url=${encodeURIComponent(`/live/${stream}.stream/playlist.m3u8`)}` : undefined,
-      webUrl: 'https://web6.seattle.gov/travelers/',
+      directVideoUrl: stream ? `${VIDEO_ORIGIN}/live/${encodeURIComponent(stream)}.stream/playlist.m3u8` : undefined,
+      webUrl: 'https://web.seattle.gov/Travelers/',
       ...(Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : {}),
     });
   }
@@ -91,6 +95,7 @@ function normalizeSdot(rows: SdotCamera[]): Camera[] {
       label,
       imagePath,
       videoUrl,
+      directVideoUrl: videoUrl,
       webUrl: row.web_url?.url,
       ...(Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : {}),
     });
@@ -206,7 +211,7 @@ function page(cameras: Camera[]): Response {
   return new Response(html, { headers: {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'public, max-age=30, s-maxage=120, stale-while-revalidate=300, stale-if-error=86400',
-    'Content-Security-Policy': "default-src 'self'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com; media-src 'self' blob:; style-src 'self' 'unsafe-inline' https://unpkg.com; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; connect-src 'self' https://*.basemaps.cartocdn.com https://unpkg.com https://cdn.jsdelivr.net; worker-src 'self' blob:;",
+    'Content-Security-Policy': "default-src 'self'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com; media-src 'self' blob: https://61e0c5d388c2e.streamlock.net; style-src 'self' 'unsafe-inline' https://unpkg.com; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; connect-src 'self' https://61e0c5d388c2e.streamlock.net https://*.basemaps.cartocdn.com https://unpkg.com https://cdn.jsdelivr.net; worker-src 'self' blob:;",
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'X-Content-Type-Options': 'nosniff',
   } });
@@ -252,8 +257,22 @@ async function video(request: Request, requestUrl: URL): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Method not allowed', { status: 405 });
   const targetPath = requestUrl.searchParams.get('url');
   if (!targetPath || !targetPath.startsWith('/live/') || targetPath.includes('..')) return new Response('Invalid video path', { status: 400 });
-  const upstreamUrl = new URL(`https://${VIDEO_SERVER}${targetPath}`);
-  const upstream = await fetch(upstreamUrl, { method: request.method, headers: { Accept: request.headers.get('Accept') || '*/*' }, redirect: 'follow' });
+  const upstreamUrl = new URL(`${VIDEO_ORIGIN}${targetPath}`);
+  let upstream: Response;
+  try {
+    upstream = await fetch(upstreamUrl, {
+      method: request.method,
+      headers: { Accept: request.headers.get('Accept') || '*/*' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(VIDEO_FETCH_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+    return new Response(timedOut ? 'Video upstream timed out' : 'Video upstream unavailable', {
+      status: timedOut ? 504 : 502,
+      headers: { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' },
+    });
+  }
   const contentType = upstream.headers.get('Content-Type') || '';
   const isPlaylist = contentType.includes('mpegurl') || upstreamUrl.pathname.endsWith('.m3u8');
   const headers = new Headers(upstream.headers);
