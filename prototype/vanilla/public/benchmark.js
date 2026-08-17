@@ -31,6 +31,12 @@ const anomaly = new Map();
 let anomalyHistory = loadAnomalyHistory();
 let anomalyCanvas = null;
 let anomalyContext = null;
+const anomalyQueue = new Map();
+const analyzedSources = new Map();
+let anomalyQueueTimer = null;
+let anomalySaveTimer = null;
+let anomalyUiTimer = null;
+const ANOMALY_START_DELAY = 4000;
 
 const $ = (selector) => document.querySelector(selector);
 const grid = $('#grid');
@@ -90,7 +96,11 @@ function loadAnomalyHistory() {
   } catch { return {}; }
 }
 function saveAnomalyHistory() {
-  try { localStorage.setItem(ANOMALY_STORAGE_KEY, JSON.stringify(anomalyHistory)); } catch {}
+  if (anomalySaveTimer) return;
+  anomalySaveTimer = setTimeout(() => {
+    anomalySaveTimer = null;
+    try { localStorage.setItem(ANOMALY_STORAGE_KEY, JSON.stringify(anomalyHistory)); } catch {}
+  }, 1200);
 }
 function median(values) {
   if (!values.length) return 0;
@@ -157,6 +167,33 @@ function updateAnomalyCard(camera) {
   if (isUnusual(camera)) meta.title=state.reason;
   else meta.removeAttribute('title');
 }
+function scheduleAnomalyUi() {
+  if (anomalyUiTimer) return;
+  anomalyUiTimer = setTimeout(() => {
+    anomalyUiTimer = null;
+    renderCollections();
+    updateCounts();
+    if (!diagnostics.hidden) renderDiagnostics();
+    if (activeCollections.includes('unusual')) refilter();
+  }, 350);
+}
+function processAnomalyQueue() {
+  anomalyQueueTimer = null;
+  if (document.hidden || !anomalyQueue.size) return;
+  const [id, item] = anomalyQueue.entries().next().value;
+  anomalyQueue.delete(id);
+  analyzeImage(item.camera,item.img);
+  if (anomalyQueue.size) anomalyQueueTimer = setTimeout(processAnomalyQueue,80);
+}
+function queueAnomalyAnalysis(camera,img) {
+  const src = img.currentSrc || img.src;
+  if (!src || analyzedSources.get(camera.id) === src) return;
+  analyzedSources.set(camera.id,src);
+  anomalyQueue.set(camera.id,{camera,img});
+  if (anomalyQueueTimer) return;
+  const delay = Math.max(80, ANOMALY_START_DELAY - performance.now());
+  anomalyQueueTimer = setTimeout(processAnomalyQueue,delay);
+}
 function analyzeImage(camera,img) {
   const current=fingerprintImage(img);
   if (!current) return;
@@ -174,10 +211,7 @@ function analyzeImage(camera,img) {
   anomalyHistory[camera.id]=record;
   saveAnomalyHistory();
   updateAnomalyCard(camera);
-  renderCollections();
-  updateCounts();
-  if (!diagnostics.hidden) renderDiagnostics();
-  if (activeCollections.includes('unusual')) refilter();
+  scheduleAnomalyUi();
 }
 
 function matchesCollection(camera, id) {
@@ -226,9 +260,9 @@ function bindImageHealth(root = grid) {
     img.dataset.healthBound = '1';
     const camera = cameraById(img.closest('.camera-card')?.dataset.cameraId);
     if (!camera) return;
-    img.addEventListener('load', () => { noteHealth(camera,'refresh'); queueMicrotask(()=>analyzeImage(camera,img)); });
+    img.addEventListener('load', () => { noteHealth(camera,'refresh'); queueAnomalyAnalysis(camera,img); });
     img.addEventListener('error', () => noteHealth(camera,'image-error'));
-    if (img.complete && img.naturalWidth) queueMicrotask(()=>analyzeImage(camera,img));
+    if (img.complete && img.naturalWidth) queueAnomalyAnalysis(camera,img);
   });
 }
 const cardObserver = new IntersectionObserver((entries) => {
