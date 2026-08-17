@@ -1,0 +1,148 @@
+from pathlib import Path
+
+wp = Path('prototype/vanilla/worker.ts')
+w = wp.read_text()
+w = w.replace(
+    "const VIDEO_SERVER = '61e0c5d388c2e.streamlock.net';",
+    "const VIDEO_SERVER = '61e0c5d388c2e.streamlock.net';\nconst VIDEO_ORIGIN = `https://${VIDEO_SERVER}:443`;\nconst VIDEO_FETCH_TIMEOUT_MS = 7000;",
+)
+w = w.replace("  videoUrl?: string;\n", "  videoUrl?: string;\n  directVideoUrl?: string;\n", 1)
+old = """      videoUrl: stream ? `/api/video?url=${encodeURIComponent(`/live/${stream}.stream/playlist.m3u8`)}` : undefined,
+      webUrl: 'https://web6.seattle.gov/travelers/',
+"""
+new = """      videoUrl: stream ? `/api/video?url=${encodeURIComponent(`/live/${stream}.stream/playlist.m3u8`)}` : undefined,
+      directVideoUrl: stream ? `${VIDEO_ORIGIN}/live/${encodeURIComponent(stream)}.stream/playlist.m3u8` : undefined,
+      webUrl: 'https://web.seattle.gov/Travelers/',
+"""
+if old not in w:
+    raise SystemExit('ArcGIS video block not found')
+w = w.replace(old, new, 1)
+w = w.replace(
+    "      videoUrl,\n      webUrl: row.web_url?.url,",
+    "      videoUrl,\n      directVideoUrl: videoUrl,\n      webUrl: row.web_url?.url,",
+    1,
+)
+old = """    'Content-Security-Policy': "default-src 'self'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com; media-src 'self' blob:; style-src 'self' 'unsafe-inline' https://unpkg.com; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; connect-src 'self' https://*.basemaps.cartocdn.com https://unpkg.com https://cdn.jsdelivr.net; worker-src 'self' blob:;",
+"""
+new = """    'Content-Security-Policy': "default-src 'self'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com; media-src 'self' blob: https://61e0c5d388c2e.streamlock.net; style-src 'self' 'unsafe-inline' https://unpkg.com; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; connect-src 'self' https://61e0c5d388c2e.streamlock.net https://*.basemaps.cartocdn.com https://unpkg.com https://cdn.jsdelivr.net; worker-src 'self' blob:;",
+"""
+if old not in w:
+    raise SystemExit('CSP block not found')
+w = w.replace(old, new, 1)
+old = """  const upstreamUrl = new URL(`https://${VIDEO_SERVER}${targetPath}`);
+  const upstream = await fetch(upstreamUrl, { method: request.method, headers: { Accept: request.headers.get('Accept') || '*/*' }, redirect: 'follow' });
+"""
+new = """  const upstreamUrl = new URL(`${VIDEO_ORIGIN}${targetPath}`);
+  let upstream: Response;
+  try {
+    upstream = await fetch(upstreamUrl, {
+      method: request.method,
+      headers: { Accept: request.headers.get('Accept') || '*/*' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(VIDEO_FETCH_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+    return new Response(timedOut ? 'Video upstream timed out' : 'Video upstream unavailable', {
+      status: timedOut ? 504 : 502,
+      headers: { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' },
+    });
+  }
+"""
+if old not in w:
+    raise SystemExit('Worker video fetch block not found')
+w = w.replace(old, new, 1)
+wp.write_text(w)
+
+jp = Path('prototype/vanilla/public/benchmark.js')
+s = jp.read_text()
+old = """async function attachHls(video, camera, onFatal) {
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = camera.videoUrl;
+    return null;
+  }
+  await ensureHlsScript();
+  if (!window.Hls?.isSupported()) throw new Error('HLS playback is not supported');
+  const instance = new Hls({enableWorker:true,lowLatencyMode:false});
+  instance.loadSource(camera.videoUrl);
+  instance.attachMedia(video);
+  instance.on(Hls.Events.ERROR,(_event,data)=>{if(data.fatal)onFatal?.(data);});
+  return instance;
+}
+"""
+new = """function preferredVideoUrl(camera) {
+  return camera.directVideoUrl || camera.videoUrl;
+}
+function withTimeout(promise, ms, message = 'Video connection timed out') {
+  let timer;
+  const timeout = new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(message)),ms);});
+  return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer));
+}
+async function attachHls(video, camera, onFatal) {
+  const source = preferredVideoUrl(camera);
+  if (!source) throw new Error('No video source');
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = source;
+    return null;
+  }
+  await ensureHlsScript();
+  if (!window.Hls?.isSupported()) throw new Error('HLS playback is not supported');
+  const instance = new Hls({enableWorker:true,lowLatencyMode:false});
+  instance.loadSource(source);
+  instance.attachMedia(video);
+  instance.on(Hls.Events.ERROR,(_event,data)=>{if(data.fatal)onFatal?.(data);});
+  return instance;
+}
+"""
+if old not in s:
+    raise SystemExit('attachHls block not found')
+s = s.replace(old, new, 1)
+old = """  if (button) {
+    button.classList.toggle('is-playing',playing);
+"""
+new = """  if (button) {
+    button.classList.remove('is-connecting');
+    button.classList.toggle('is-playing',playing);
+"""
+if old not in s:
+    raise SystemExit('grid UI block not found')
+s = s.replace(old, new, 1)
+old = """  shell.insertBefore(video,img);
+  img.hidden = true;
+  updateGridPlayerUi(id,true);
+  const player = {video,hls:null,mode};
+  gridPlayers.set(id,player);
+  try {
+    player.hls = await attachHls(video,camera,()=>{noteHealth(camera,'stream-error');stopGridVideo(id);});
+    await video.play();
+  } catch {
+    noteHealth(camera,'stream-error');
+    stopGridVideo(id);
+  }
+"""
+new = """  shell.insertBefore(video,img);
+  const player = {video,hls:null,mode};
+  gridPlayers.set(id,player);
+  const button = card.querySelector('[data-grid-play]');
+  if (button) {
+    button.classList.add('is-connecting');
+    button.querySelector('.play-icon').textContent = '…';
+    button.querySelector('.play-label').textContent = 'Connecting';
+    button.setAttribute('aria-label',`Connecting live video for ${camera.label}`);
+  }
+  try {
+    player.hls = await attachHls(video,camera,()=>{noteHealth(camera,'stream-error');stopGridVideo(id);});
+    await withTimeout(video.play(),8000);
+    if (!gridPlayers.has(id)) return;
+    img.hidden = true;
+    if (button) button.classList.remove('is-connecting');
+    updateGridPlayerUi(id,true);
+  } catch {
+    noteHealth(camera,'stream-error');
+    stopGridVideo(id);
+  }
+"""
+if old not in s:
+    raise SystemExit('startGridVideo block not found')
+s = s.replace(old, new, 1)
+jp.write_text(s)
