@@ -1,0 +1,34 @@
+name: Apply anomaly startup delay
+
+on:
+  push:
+    branches:
+      - feature/what-changed
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Add one-shot anomaly delay patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/what-changed
+      - run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('prototype/vanilla/public/benchmark.js')
+          s=p.read_text()
+          old='const ANOMALY_START_DELAY = 4000;'
+          new='const ANOMALY_START_DELAY = 12000;'
+          if old not in s: raise SystemExit('startup-delay marker missing')
+          p.write_text(s.replace(old,new,1))
+          PY
+          node --check prototype/vanilla/public/benchmark.js
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add prototype/vanilla/public/benchmark.js
+          git commit -m 'Move anomaly learning outside startup window'
+          git push origin HEAD:feature/what-changed
