@@ -11,22 +11,28 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
-      - name: Trace official Travelers Wowza URL resolver
+      - name: Probe exact official Wowza resolver and sample stream
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL --max-time 20 'https://web.seattle.gov/Travelers/js/utils.js' -o /tmp/utils.js
-          echo '===== getWowsaUrl context ====='
-          grep -n -A25 -B15 -Ei 'getWowsaUrl|Wowsa|wowza' /tmp/utils.js || true
-          echo '===== API/config calls in utils ====='
-          grep -n -E -A8 -B4 'api/|ajax|Config|config' /tmp/utils.js | head -500 || true
-          echo '===== Travelers API candidates ====='
-          for P in \
-            'api/Map/GetWowsaUrl' \
-            'api/Map/GetWowzaUrl' \
-            'api/Map/GetConfig' \
-            'api/Map/GetConfiguration'; do
-            echo "--- $P ---"
-            curl -sS -D - --max-time 15 -o /tmp/body "https://web.seattle.gov/Travelers/$P" | head -25 || true
-            head -20 /tmp/body || true
+          echo '=== app path marker ==='
+          curl -fsSL --max-time 20 'https://web.seattle.gov/Travelers/' | grep -n -i 'site-app-path' || true
+          for BASE in 'https://web.seattle.gov/Travelers/' 'https://web.seattle.gov/'; do
+            U="${BASE}api/Map/WowsaUrl"
+            echo "=== $U ==="
+            rm -f /tmp/wowsa
+            curl -sS -D /tmp/headers --max-time 15 -o /tmp/wowsa "$U" || true
+            cat /tmp/headers || true
+            echo 'BODY:'; cat /tmp/wowsa || true; echo
           done
+          ARC='https://services.arcgis.com/ZOyb2t4B0UYuYNYH/ArcGIS/rest/services/Traffic_Cameras_CDL/FeatureServer/0/query?where=SERVSTAT%3D%27ACTV%27&outFields=NAME%2CSTREAM_NAME&returnGeometry=false&resultRecordCount=1&f=json'
+          curl -fsSL "$ARC" -o /tmp/camera.json
+          S=$(python -c "import json; print(json.load(open('/tmp/camera.json'))['features'][0]['attributes']['STREAM_NAME'])")
+          TEMPLATE=$(curl -fsSL --max-time 15 'https://web.seattle.gov/Travelers/api/Map/WowsaUrl' | python -c "import json,sys; x=json.load(sys.stdin); print(x if isinstance(x,str) else x.get('url') or x.get('Url') or x)")
+          echo "TEMPLATE=$TEMPLATE"
+          URL=${TEMPLATE//\{stream\}/${S}.stream}
+          echo "SAMPLE=$URL"
+          rm -f /tmp/stream
+          curl -sS -D /tmp/streamheaders --max-time 15 -o /tmp/stream "$URL" || true
+          cat /tmp/streamheaders || true
+          echo 'STREAM BODY:'; head -30 /tmp/stream || true
