@@ -70,10 +70,11 @@ jobs:
 
           home_ok=0
           for attempt in {1..12}; do
-            home_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-home -w '%{http_code}' https://cams.hoxel.dev/ || true)"
-            js_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-js -w '%{http_code}' https://cams.hoxel.dev/benchmark.js || true)"
-            api_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-cameras -w '%{http_code}' 'https://cams.hoxel.dev/api/cameras?source=arcgis' || true)"
-            history_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-history -w '%{http_code}' https://cams.hoxel.dev/api/history/status || true)"
+            nonce="$(date +%s%N)"
+            home_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-home -w '%{http_code}' "https://cams.hoxel.dev/?smoke=${nonce}" || true)"
+            js_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-js -w '%{http_code}' "https://cams.hoxel.dev/benchmark.js?smoke=${nonce}" || true)"
+            api_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-cameras -w '%{http_code}' "https://cams.hoxel.dev/api/cameras?source=arcgis&smoke=${nonce}" || true)"
+            history_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-history -w '%{http_code}' "https://cams.hoxel.dev/api/history/status?smoke=${nonce}" || true)"
             echo "Production readiness ${attempt}/12: home=${home_status}, js=${js_status}, cameras=${api_status}, history=${history_status}"
             if [ "$home_status" = "200" ] && [ "$js_status" = "200" ] && [ "$api_status" = "200" ] && [ "$history_status" = "200" ] \
               && grep -q 'Seattle Traffic Watch' /tmp/cams-home \
@@ -105,9 +106,18 @@ jobs:
           transformed_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-transformed -w '%{http_code}' "https://cams.hoxel.dev/api/image?path=${encoded_image_path}&w=480")"
           test "$transformed_status" = "200" || { echo "Expected transformed camera image to return 200, got ${transformed_status}"; exit 1; }
 
-          timeline_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-timeline -w '%{http_code}' "https://cams.hoxel.dev/api/history?camera=${encoded_camera_id}&hours=6&limit=96")"
-          test "$timeline_status" = "200" || { echo "Expected history timeline API to return 200, got ${timeline_status}"; cat /tmp/cams-timeline || true; exit 1; }
-          jq -e '.cameraId and (.frames | type == "array")' /tmp/cams-timeline >/dev/null || { echo "History timeline payload invalid"; cat /tmp/cams-timeline; exit 1; }
+          timeline_ok=0
+          for attempt in {1..12}; do
+            nonce="$(date +%s%N)"
+            timeline_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-timeline -w '%{http_code}' "https://cams.hoxel.dev/api/history?camera=${encoded_camera_id}&hours=6&limit=96&smoke=${nonce}" || true)"
+            echo "History timeline readiness ${attempt}/12: ${timeline_status}"
+            if [ "$timeline_status" = "200" ] && jq -e '.cameraId and (.frames | type == "array")' /tmp/cams-timeline >/dev/null 2>&1; then
+              timeline_ok=1
+              break
+            fi
+            sleep 5
+          done
+          test "$timeline_ok" -eq 1 || { echo "History timeline did not become healthy"; cat /tmp/cams-timeline || true; exit 1; }
 
           echo "Core production smoke test passed: app, cameras, images, D1/R2 history API, and timeline endpoint are healthy"
 
