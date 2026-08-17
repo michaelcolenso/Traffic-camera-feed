@@ -52,25 +52,29 @@ function scoreRow(row: PulseRow, now: number) {
   const latestCapturedAt = Number(row.latest_captured_at) || 0;
   const changedNow = Number(row.latest_duplicate) === 0;
   const ageMinutes = Math.max(0, (now - latestCapturedAt) / 60000);
-  const transitionRate = samples > 1 ? transitions / (samples - 1) : 0;
+  const transitionRate = samples ? transitions / samples : 0;
   const freshness = Math.max(0, 1 - ageMinutes / 20);
   const confidence = Math.min(1, samples / 8);
   const corridor = corridorWeight(row.camera_label || '');
+  const hasChangeEvidence = transitions > 0 || uniqueScenes > 1 || changedNow;
   let score = 0;
-  score += Math.min(44, transitions * 11);
-  score += Math.min(18, Math.max(0, uniqueScenes - 1) * 4.5);
-  score += transitionRate * 12;
-  score += changedNow ? 8 : 0;
-  score += freshness * 8;
-  score += corridor.weight;
-  score *= 0.55 + confidence * 0.45;
+  if (hasChangeEvidence) {
+    score += Math.min(48, transitions * 8);
+    score += Math.min(18, Math.max(0, uniqueScenes - 1) * 4.5);
+    score += Math.min(14, transitionRate * 24);
+    score += changedNow ? 10 : 0;
+    score += freshness * 6;
+    score += corridor.weight;
+    score *= 0.55 + confidence * 0.45;
+  }
   score = Math.round(Math.max(0, Math.min(100, score)));
-  let reason = 'Recent scene change';
+  let reason = corridor.corridor ? 'Stable recent view on ' + corridor.corridor : 'Stable recent view';
   if (transitions >= 5) reason = 'Repeated scene changes';
-  else if (transitionRate >= 0.65 && samples >= 4) reason = 'High visual churn';
+  else if (transitionRate >= 0.5 && samples >= 4) reason = 'High visual churn';
   else if (changedNow && transitions >= 2) reason = 'Fresh scene shift';
   else if (uniqueScenes >= 4) reason = 'Several distinct recent scenes';
-  else if (corridor.corridor && transitions >= 1) reason = 'Change on ' + corridor.corridor;
+  else if (transitions >= 1 && corridor.corridor) reason = 'Change on ' + corridor.corridor;
+  else if (transitions >= 1 || changedNow) reason = 'Recent scene change';
   return {
     cameraId: row.camera_id,
     label: row.camera_label,
@@ -98,8 +102,7 @@ export async function handlePulseRequest(request: Request, url: URL, env: PulseB
   const cutoff = now - windowMinutes * 60000;
   const result = await env.HISTORY_DB.prepare(`
     WITH recent AS (
-      SELECT camera_id, camera_label, captured_at, sha256, is_duplicate,
-             LAG(sha256) OVER (PARTITION BY camera_id ORDER BY captured_at) AS previous_sha
+      SELECT camera_id, camera_label, captured_at, sha256, is_duplicate
         FROM camera_snapshots
        WHERE captured_at >= ?
     ), ranked AS (
@@ -110,7 +113,7 @@ export async function handlePulseRequest(request: Request, url: URL, env: PulseB
       SELECT camera_id,
              MAX(camera_label) AS camera_label,
              COUNT(*) AS samples,
-             SUM(CASE WHEN previous_sha IS NOT NULL AND previous_sha <> sha256 THEN 1 ELSE 0 END) AS transitions,
+             SUM(CASE WHEN is_duplicate = 0 THEN 1 ELSE 0 END) AS transitions,
              COUNT(DISTINCT sha256) AS unique_scenes,
              MAX(captured_at) AS latest_captured_at
         FROM recent
