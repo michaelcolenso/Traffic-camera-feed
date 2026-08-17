@@ -1,0 +1,98 @@
+name: Final4 Validate Seattle Pulse
+
+on:
+  push:
+    branches: [feature/seattle-pulse]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.event.head_commit.message == 'Validate Seattle Pulse after CLS fix'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Validate source
+        run: |
+          node --check prototype/vanilla/public/benchmark.js
+          npm run lint
+      - name: Deploy isolated current candidate
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('wrangler.jsonc').read_text())
+          data['name']='hoxel-traffic-camera-pulse-benchmark'
+          data.pop('routes',None); data.pop('triggers',None)
+          data['workers_dev']=True; data['preview_urls']=True
+          Path('wrangler.pulse-preview.jsonc').write_text(json.dumps(data,indent=2)+'\n')
+          PY
+          npx wrangler deploy --config wrangler.pulse-preview.jsonc 2>&1 | tee /tmp/deploy.log
+          url=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/deploy.log | tail -1)
+          test -n "$url"
+          echo "PREVIEW_URL=$url" >> "$GITHUB_ENV"
+      - name: Validate real Pulse API
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=0
+          for i in {1..15}; do
+            status=$(curl -sS --max-time 15 -o /tmp/pulse.json -w '%{http_code}' "$PREVIEW_URL/api/pulse?window=60&limit=12&v=$(date +%s%N)" || true)
+            if [ "$status" = 200 ] && jq -e '.activeCameras > 0 and .camerasAnalyzed > 0 and any(.items[]; .transitions > 0)' /tmp/pulse.json >/dev/null 2>&1; then ready=1; break; fi
+            sleep 3
+          done
+          test "$ready" -eq 1
+          jq -e '.methodology | contains("does not infer crashes")' /tmp/pulse.json >/dev/null
+          echo "PULSE=$(jq -c '{pulseScore,state,activeCameras,camerasAnalyzed,top:(.items[:3]|map({label,score,reason,transitions}))}' /tmp/pulse.json)"
+      - name: Browser interaction with system Chrome
+        shell: bash
+        run: |
+          npm install --no-save playwright >/dev/null
+          CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)
+          test -n "$CHROME"
+          mkdir -p tests
+          cat > tests/pulse-ui-final.mjs <<'JS'
+          import { chromium } from 'playwright';
+          const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME,args:['--no-sandbox']});
+          const page=await browser.newPage({viewport:{width:390,height:844}});
+          const errors=[]; page.on('pageerror',e=>errors.push(String(e)));
+          await page.goto(`${process.env.PREVIEW_URL}/?pulse_ui=${Date.now()}`,{waitUntil:'networkidle'});
+          const pulse=page.locator('#pulse');
+          const heading=pulse.locator('.pulse-head .eyebrow');
+          await heading.waitFor({state:'visible',timeout:15000});
+          if((await heading.textContent())?.trim()!=='Seattle Pulse') throw new Error('Seattle Pulse heading mismatch');
+          const card=pulse.locator('.pulse-card').first();
+          await card.waitFor({state:'visible'});
+          await card.click();
+          await page.locator('#modal[open]').waitFor({state:'visible'});
+          await page.locator('#time-machine').waitFor({state:'visible'});
+          if(errors.length) throw new Error(errors.join('; '));
+          await browser.close();
+          console.log('Seattle Pulse interaction passed');
+          JS
+          CHROME="$CHROME" node tests/pulse-ui-final.mjs
+      - name: Lighthouse three-run gate
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            npx lighthouse "$PREVIEW_URL/?lh=$i" --quiet --chrome-flags='--headless --no-sandbox' --only-categories=performance,accessibility --output=json --output-path="/tmp/lh-$i.json"
+          done
+          node - <<'JS'
+          const fs=require('fs');
+          const rows=[1,2,3].map(i=>{const r=JSON.parse(fs.readFileSync(`/tmp/lh-${i}.json`));return {performance:Math.round(r.categories.performance.score*100),a11y:Math.round(r.categories.accessibility.score*100),lcp:Math.round(r.audits['largest-contentful-paint'].numericValue),tbt:Math.round(r.audits['total-blocking-time'].numericValue),cls:r.audits['cumulative-layout-shift'].numericValue};});
+          console.log('LIGHTHOUSE='+JSON.stringify(rows));
+          if(Math.min(...rows.map(r=>r.performance))<95) process.exit(1);
+          if(Math.min(...rows.map(r=>r.a11y))<100) process.exit(1);
+          if(Math.max(...rows.map(r=>r.cls))>0.05) process.exit(1);
+          JS
