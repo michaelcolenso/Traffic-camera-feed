@@ -22,7 +22,7 @@
 
 
 /* Seattle Pulse */
-.pulse{max-width:80rem;margin:.9rem auto 0;padding:0 1rem}
+.pulse{max-width:80rem;margin:.9rem auto 0;padding:0 1rem;min-height:9rem}
 .pulse-loading,.pulse-head{display:flex;justify-content:space-between;align-items:center;gap:1rem;border:1px solid rgba(103,232,249,.18);background:linear-gradient(120deg,rgba(8,47,73,.5),rgba(15,23,42,.72));border-radius:1rem;padding:.8rem 1rem}
 .pulse-loading strong,.pulse-title strong{font-family:"Arial Narrow","Avenir Next Condensed","Helvetica Neue Condensed",Arial,sans-serif;text-transform:capitalize}
 .pulse-loading>span,.pulse-meta,.pulse-method,.pulse-card small{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;color:#94a3b8;font-size:.64rem}
