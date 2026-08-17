@@ -1,4 +1,5 @@
 import { captureHistory, handleHistoryRequest, purgeHistory, type HistoryBindings } from './history';
+import { handlePulseRequest, type PulseBindings } from './pulse';
 
 const DEFAULT_FEATURE_SERVICE = 'https://services.arcgis.com/ZOyb2t4B0UYuYNYH/ArcGIS/rest/services/Traffic_Cameras_CDL/FeatureServer/0';
 const SDOT_ENDPOINT = 'https://data.seattle.gov/resource/65fc-btcc.json';
@@ -200,6 +201,7 @@ function page(cameras: Camera[]): Response {
       <button id="apply-source" class="chip accent">Apply</button><button id="restore-source" class="chip">Restore default</button>
       <p id="source-error" class="error" role="alert"></p>
     </section>
+    <section id="pulse" class="pulse" aria-label="Seattle Pulse"><div class="pulse-loading"><div><p class="eyebrow">Seattle Pulse</p><strong>Reading the city…</strong></div><span>Ranking recent camera changes</span></div></section>
     <section class="toolbar">
       <div id="collections" class="collections" aria-label="Camera collections">${initialCollectionButtons(cameras)}</div>
       <div class="toolbar-row"><p id="visible-count">${cameras.length} visible / ${cameras.length} total</p><div class="match-toggle"><button id="match-all" class="active" aria-pressed="true">Match all</button><button id="match-any" aria-pressed="false">Match any</button></div><button id="diagnostics-toggle" class="chip">Diagnostics · 0 issues</button></div>
@@ -291,10 +293,12 @@ async function video(request: Request, requestUrl: URL): Promise<Response> {
 }
 
 export default {
-  async fetch(request: Request, env: Env & HistoryBindings): Promise<Response> {
+  async fetch(request: Request, env: Env & HistoryBindings & PulseBindings): Promise<Response> {
     const url = new URL(request.url);
     const historyResponse = await handleHistoryRequest(request, url, env);
     if (historyResponse) return historyResponse;
+    const pulseResponse = await handlePulseRequest(request, url, env);
+    if (pulseResponse) return pulseResponse;
     if (url.pathname === '/') {
       try { return page(await getArcGISCameras()); }
       catch (error) {
