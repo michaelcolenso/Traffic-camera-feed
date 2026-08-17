@@ -1,0 +1,42 @@
+name: Patch Seattle Pulse Ranking
+
+on:
+  push:
+    branches: [feature/seattle-pulse]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Refine Seattle Pulse ranking evidence'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Refine event-driven scoring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('prototype/vanilla/pulse.ts')
+          s=p.read_text()
+          s=s.replace('const transitionRate = samples > 1 ? transitions / (samples - 1) : 0;', 'const transitionRate = samples ? transitions / samples : 0;')
+          old='''  let score = 0;\n  score += Math.min(44, transitions * 11);\n  score += Math.min(18, Math.max(0, uniqueScenes - 1) * 4.5);\n  score += transitionRate * 12;\n  score += changedNow ? 8 : 0;\n  score += freshness * 8;\n  score += corridor.weight;\n  score *= 0.55 + confidence * 0.45;\n  score = Math.round(Math.max(0, Math.min(100, score)));'''
+          new='''  const hasChangeEvidence = transitions > 0 || uniqueScenes > 1 || changedNow;\n  let score = 0;\n  if (hasChangeEvidence) {\n    score += Math.min(48, transitions * 8);\n    score += Math.min(18, Math.max(0, uniqueScenes - 1) * 4.5);\n    score += Math.min(14, transitionRate * 24);\n    score += changedNow ? 10 : 0;\n    score += freshness * 6;\n    score += corridor.weight;\n    score *= 0.55 + confidence * 0.45;\n  }\n  score = Math.round(Math.max(0, Math.min(100, score)));'''
+          if old not in s: raise SystemExit('score anchor missing')
+          s=s.replace(old,new)
+          old_reason="""  let reason = 'Recent scene change';\n  if (transitions >= 5) reason = 'Repeated scene changes';\n  else if (transitionRate >= 0.65 && samples >= 4) reason = 'High visual churn';\n  else if (changedNow && transitions >= 2) reason = 'Fresh scene shift';\n  else if (uniqueScenes >= 4) reason = 'Several distinct recent scenes';\n  else if (corridor.corridor && transitions >= 1) reason = 'Change on ' + corridor.corridor;"""
+          new_reason="""  let reason = corridor.corridor ? 'Stable recent view on ' + corridor.corridor : 'Stable recent view';\n  if (transitions >= 5) reason = 'Repeated scene changes';\n  else if (transitionRate >= 0.5 && samples >= 4) reason = 'High visual churn';\n  else if (changedNow && transitions >= 2) reason = 'Fresh scene shift';\n  else if (uniqueScenes >= 4) reason = 'Several distinct recent scenes';\n  else if (transitions >= 1 && corridor.corridor) reason = 'Change on ' + corridor.corridor;\n  else if (transitions >= 1 || changedNow) reason = 'Recent scene change';"""
+          if old_reason not in s: raise SystemExit('reason anchor missing')
+          s=s.replace(old_reason,new_reason)
+          s=s.replace('''      SELECT camera_id, camera_label, captured_at, sha256, is_duplicate,\n             LAG(sha256) OVER (PARTITION BY camera_id ORDER BY captured_at) AS previous_sha\n        FROM camera_snapshots''','''      SELECT camera_id, camera_label, captured_at, sha256, is_duplicate\n        FROM camera_snapshots''')
+          s=s.replace('SUM(CASE WHEN previous_sha IS NOT NULL AND previous_sha <> sha256 THEN 1 ELSE 0 END) AS transitions,','SUM(CASE WHEN is_duplicate = 0 THEN 1 ELSE 0 END) AS transitions,')
+          p.write_text(s)
+          PY
+          npm run lint
+      - name: Commit ranking refinement
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add prototype/vanilla/pulse.ts
+          git commit -m 'Refine Seattle Pulse event scoring'
+          git push
