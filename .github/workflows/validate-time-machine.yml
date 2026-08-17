@@ -1,0 +1,99 @@
+name: Validate Traffic Time Machine
+
+on:
+  push:
+    branches: [feature/traffic-time-machine]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.event.head_commit.message == 'Validate Time Machine end to end'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node --check prototype/vanilla/public/benchmark.js
+      - run: npm run lint
+      - name: Build preview config
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('wrangler.jsonc').read_text())
+          data['name']='hoxel-traffic-camera-time-machine-preview'
+          data.pop('routes',None)
+          data.pop('triggers',None)
+          data['workers_dev']=True
+          Path('wrangler.preview.jsonc').write_text(json.dumps(data,indent=2)+'\n')
+          PY
+          npx wrangler types /tmp/preview-types.d.ts --config wrangler.preview.jsonc
+          grep -q HISTORY_DB /tmp/preview-types.d.ts
+          grep -q HISTORY_BUCKET /tmp/preview-types.d.ts
+      - name: Deploy isolated preview
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler deploy --config wrangler.preview.jsonc 2>&1 | tee /tmp/deploy.log
+          url=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/deploy.log | tail -1)
+          test -n "$url"
+          echo "PREVIEW_URL=$url" >> "$GITHUB_ENV"
+      - name: Verify APIs and bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in {1..12}; do
+            code=$(curl -sS --max-time 10 -o /tmp/home -w '%{http_code}' "$PREVIEW_URL/?v=$i" || true)
+            [ "$code" = 200 ] && break
+            sleep 3
+          done
+          curl -fsSL "$PREVIEW_URL/api/cameras?validation=$(date +%s%N)" -o /tmp/cameras.json
+          curl -fsSL "$PREVIEW_URL/api/history/status?validation=$(date +%s%N)" -o /tmp/status.json
+          jq -e 'type=="array" and length>0' /tmp/cameras.json >/dev/null
+          jq -e 'has("frames") and has("cameras")' /tmp/status.json >/dev/null
+          id=$(jq -r '.[0].id' /tmp/cameras.json)
+          encoded=$(python -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$id")
+          curl -fsSL "$PREVIEW_URL/api/history?camera=$encoded&hours=6&limit=96" -o /tmp/history.json
+          jq -e '.cameraId and (.frames|type=="array")' /tmp/history.json >/dev/null
+          echo "History status: $(cat /tmp/status.json)"
+      - name: Browser Time Machine interaction test
+        shell: bash
+        run: |
+          npx playwright install chromium --with-deps >/dev/null
+          cat > tests/time-machine-validation.mjs <<'JS'
+          import { chromium } from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          const page=await browser.newPage({viewport:{width:390,height:844}});
+          const errors=[];page.on('pageerror',e=>errors.push(String(e)));
+          await page.route('**/api/history?camera=**',async route=>{
+            const camera=new URL(route.request().url()).searchParams.get('camera');
+            const now=Date.now();
+            const frames=Array.from({length:6},(_,i)=>({capturedAt:now-(5-i)*300000,imageUrl:'/api/image?path=%2Ftrafficcams%2Fimages%2FMLK_S_Jackson_NS.jpg&w=480',sha256:String(i),bytes:1000,duplicate:false}));
+            await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({cameraId:camera,hours:6,frames})});
+          });
+          await page.goto(`${process.env.PREVIEW_URL}/?validation=${Date.now()}`,{waitUntil:'networkidle'});
+          await page.locator('.camera-open').first().click();
+          await page.locator('#time-machine').waitFor();
+          await page.locator('#history-scrubber').waitFor();
+          await page.locator('#history-scrubber').fill('2');
+          if(await page.locator('#history-frame').isHidden())throw new Error('historical frame did not display');
+          await page.locator('#history-compare').click();
+          await page.locator('#compare-stage').waitFor();
+          await page.locator('#compare-scrubber').fill('70');
+          await page.locator('#history-timelapse').click();
+          await page.waitForTimeout(700);
+          await page.locator('#history-now').click();
+          if(errors.length)throw new Error(errors.join('; '));
+          await browser.close();
+          console.log('Time Machine interaction test passed');
+          JS
+          node tests/time-machine-validation.mjs
