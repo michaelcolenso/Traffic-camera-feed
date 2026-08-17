@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           for i in {1..12}; do
-            code=$(curl -sS --max-time 10 -o /tmp/home -w '%{http_code}' "$VANILLA_URL/" || true)
+            code=$(curl -sS --max-time 10 -o /tmp/home -w '%{http_code}' "$VANILLA_URL/?validation=$(date +%s)" || true)
             [ "$code" = 200 ] && exit 0
             sleep 3
           done
@@ -44,7 +44,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL "$VANILLA_URL/api/cameras" -o /tmp/cameras.json
+          nonce=$(date +%s%N)
+          curl -fsSL "$VANILLA_URL/api/cameras?validation=$nonce" -o /tmp/cameras.json
           python - <<'PY'
           import json
           cams=json.load(open('/tmp/cameras.json'))
@@ -52,12 +53,13 @@ jobs:
           assert live, 'no live cameras'
           c=live[0]
           assert c.get('directVideoUrl','').startswith('https://61e0c5d388c2e.streamlock.net'), c
+          assert c.get('webUrl') == 'https://web.seattle.gov/Travelers/', c
           print(c['label'], c['directVideoUrl'])
           open('/tmp/proxy-path','w').write(c['videoUrl'])
           PY
           path=$(cat /tmp/proxy-path)
           start=$(date +%s)
-          code=$(curl -sS --max-time 12 -o /tmp/proxy -w '%{http_code}' "$VANILLA_URL$path" || true)
+          code=$(curl -sS --max-time 12 -o /tmp/proxy -w '%{http_code}' "$VANILLA_URL$path&validation=$nonce" || true)
           elapsed=$(( $(date +%s) - start ))
           echo "proxy status=$code elapsed=${elapsed}s body=$(cat /tmp/proxy 2>/dev/null || true)"
           [ "$elapsed" -le 10 ]
@@ -71,7 +73,7 @@ jobs:
           const browser=await chromium.launch({headless:true});
           const page=await browser.newPage({viewport:{width:390,height:844}});
           const errors=[]; page.on('pageerror',e=>errors.push(String(e)));
-          await page.goto(process.env.VANILLA_URL,{waitUntil:'networkidle'});
+          await page.goto(`${process.env.VANILLA_URL}/?validation=${Date.now()}`,{waitUntil:'networkidle'});
           const play=page.locator('[data-grid-play]').first();
           await play.click();
           const card=play.locator('xpath=ancestor::article');
