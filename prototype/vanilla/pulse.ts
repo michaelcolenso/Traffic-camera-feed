@@ -299,7 +299,6 @@ function deriveObservation(rows: SnapshotRow[], now: number, windowMinutes: numb
   const score = Math.round(Math.min(100, stateBoost + severityBoost + persistenceBoost + confidenceBoost + freshness * 8 + churnBoost + corridor.weight));
   if (score < MIN_SURFACED_SCORE) return null;
 
-  const firstChanged = [...comparisons].reverse().findLast ? undefined : undefined;
   let firstObservedAt: number | null = null;
   for (let index = changed.length - persistenceSamples; index < changed.length; index += 1) {
     if (index >= 0 && changed[index]) { firstObservedAt = comparisons[index].row.captured_at; break; }
