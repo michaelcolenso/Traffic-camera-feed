@@ -1,3 +1,5 @@
+import { captureHistory, handleHistoryRequest, purgeHistory, type HistoryBindings } from './history';
+
 const DEFAULT_FEATURE_SERVICE = 'https://services.arcgis.com/ZOyb2t4B0UYuYNYH/ArcGIS/rest/services/Traffic_Cameras_CDL/FeatureServer/0';
 const SDOT_ENDPOINT = 'https://data.seattle.gov/resource/65fc-btcc.json';
 const VIDEO_SERVER = '61e0c5d388c2e.streamlock.net';
@@ -289,8 +291,10 @@ async function video(request: Request, requestUrl: URL): Promise<Response> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env & HistoryBindings): Promise<Response> {
     const url = new URL(request.url);
+    const historyResponse = await handleHistoryRequest(request, url, env);
+    if (historyResponse) return historyResponse;
     if (url.pathname === '/') {
       try { return page(await getArcGISCameras()); }
       catch (error) {
@@ -317,5 +321,16 @@ export default {
       }
     }
     return env.ASSETS.fetch(request);
+  },
+  async scheduled(controller: { scheduledTime: number }, env: Env & HistoryBindings, ctx: { waitUntil(promise: Promise<void>): void }): Promise<void> {
+    ctx.waitUntil((async () => {
+      try {
+        const cameras = await getArcGISCameras();
+        await captureHistory(env, cameras, controller.scheduledTime);
+        await purgeHistory(env, controller.scheduledTime);
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'history_tick_error', message: error instanceof Error ? error.message : String(error) }));
+      }
+    })());
   },
 };

@@ -4,9 +4,32 @@ export type HistoryCamera = {
   imagePath: string;
 };
 
+type HistoryD1Statement = {
+  bind: (...values: unknown[]) => HistoryD1Statement;
+  first: <T>() => Promise<T | null>;
+  all: <T>() => Promise<{ results?: T[] }>;
+  run: () => Promise<unknown>;
+};
+
+type HistoryD1Database = {
+  prepare: (query: string) => HistoryD1Statement;
+};
+
+type HistoryR2Object = {
+  body: ReadableStream;
+  httpEtag: string;
+  writeHttpMetadata: (headers: Headers) => void;
+};
+
+type HistoryR2Bucket = {
+  put: (key: string, value: ArrayBuffer, options?: unknown) => Promise<unknown>;
+  get: (key: string, options?: unknown) => Promise<HistoryR2Object | null>;
+  delete: (keys: string | string[]) => Promise<void>;
+};
+
 export type HistoryBindings = {
-  HISTORY_DB?: D1Database;
-  HISTORY_BUCKET?: R2Bucket;
+  HISTORY_DB?: HistoryD1Database;
+  HISTORY_BUCKET?: HistoryR2Bucket;
 };
 
 const CAMERA_HOST = 'www.seattle.gov';
