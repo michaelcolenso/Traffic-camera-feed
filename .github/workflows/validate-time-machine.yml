@@ -8,10 +8,10 @@ permissions:
   contents: read
 
 jobs:
-  validate:
-    if: github.event.head_commit.message == 'Rerun Time Machine validation on established preview worker'
+  validate-capture:
+    if: github.event.head_commit.message == 'Validate scheduled Time Machine capture'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -19,9 +19,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: node --check prototype/vanilla/public/benchmark.js
-      - run: npm run lint
-      - name: Build preview config
+      - run: node --check prototype/vanilla/public/benchmark.js && npm run lint
+      - name: Build cron-enabled isolated config
         run: |
           python - <<'PY'
           import json
@@ -29,15 +28,11 @@ jobs:
           data=json.loads(Path('wrangler.jsonc').read_text())
           data['name']='hoxel-traffic-camera-vanilla-benchmark'
           data.pop('routes',None)
-          data.pop('triggers',None)
           data['workers_dev']=True
           data['preview_urls']=True
           Path('wrangler.preview.jsonc').write_text(json.dumps(data,indent=2)+'\n')
           PY
-          npx wrangler types /tmp/preview-types.d.ts --config wrangler.preview.jsonc
-          grep -q HISTORY_DB /tmp/preview-types.d.ts
-          grep -q HISTORY_BUCKET /tmp/preview-types.d.ts
-      - name: Deploy isolated preview
+      - name: Deploy cron-enabled isolated worker
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -48,77 +43,46 @@ jobs:
           url=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/deploy.log | tail -1)
           test -n "$url"
           echo "PREVIEW_URL=$url" >> "$GITHUB_ENV"
-      - name: Verify APIs and bindings
+      - name: Wait for real scheduled capture
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          ready=0
-          for i in {1..15}; do
-            nonce=$(date +%s%N)
-            home=$(curl -sS --max-time 10 -o /tmp/home -w '%{http_code}' "$PREVIEW_URL/?v=$nonce" || true)
-            cams=$(curl -sS --max-time 10 -o /tmp/cameras.json -w '%{http_code}' "$PREVIEW_URL/api/cameras?validation=$nonce" || true)
-            hist=$(curl -sS --max-time 10 -o /tmp/status.json -w '%{http_code}' "$PREVIEW_URL/api/history/status?validation=$nonce" || true)
-            echo "attempt=$i home=$home cameras=$cams history=$hist"
-            if [ "$home" = 200 ] && [ "$cams" = 200 ] && [ "$hist" = 200 ]; then ready=1; break; fi
-            echo "home body: $(head -c 200 /tmp/home 2>/dev/null || true)"
-            echo "cameras body: $(head -c 200 /tmp/cameras.json 2>/dev/null || true)"
-            echo "history body: $(head -c 200 /tmp/status.json 2>/dev/null || true)"
-            sleep 3
+          before=$(curl -fsSL "$PREVIEW_URL/api/history/status?v=$(date +%s%N)" | jq -r '.frames')
+          echo "frames before=$before"
+          captured=0
+          for i in {1..12}; do
+            sleep 15
+            curl -fsSL "$PREVIEW_URL/api/history/status?v=$(date +%s%N)" -o /tmp/status.json
+            frames=$(jq -r '.frames' /tmp/status.json)
+            cameras=$(jq -r '.cameras' /tmp/status.json)
+            echo "capture poll $i: frames=$frames cameras=$cameras"
+            if [ "$frames" -gt "$before" ] && [ "$cameras" -gt 0 ]; then captured=1; break; fi
           done
-          test "$ready" -eq 1
-          jq -e 'type=="array" and length>0' /tmp/cameras.json >/dev/null
-          jq -e 'has("frames") and has("cameras")' /tmp/status.json >/dev/null
-          id=$(jq -r '.[0].id' /tmp/cameras.json)
-          encoded=$(python -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$id")
-          timeline=$(curl -sS --max-time 10 -o /tmp/history.json -w '%{http_code}' "$PREVIEW_URL/api/history?camera=$encoded&hours=6&limit=96&validation=$(date +%s%N)" || true)
-          echo "timeline=$timeline body=$(head -c 300 /tmp/history.json)"
-          test "$timeline" = 200
-          jq -e '.cameraId and (.frames|type=="array")' /tmp/history.json >/dev/null
-          echo "History status: $(cat /tmp/status.json)"
-      - name: Browser Time Machine interaction test
-        shell: bash
-        run: |
-          npx playwright install chromium --with-deps >/dev/null
-          cat > tests/time-machine-validation.mjs <<'JS'
-          import { chromium } from 'playwright';
-          const browser=await chromium.launch({headless:true});
-          const page=await browser.newPage({viewport:{width:390,height:844}});
-          const errors=[];page.on('pageerror',e=>errors.push(String(e)));
-          await page.route('**/api/history?camera=**',async route=>{
-            const camera=new URL(route.request().url()).searchParams.get('camera');
-            const now=Date.now();
-            const frames=Array.from({length:6},(_,i)=>({capturedAt:now-(5-i)*300000,imageUrl:'/api/image?path=%2Ftrafficcams%2Fimages%2FMLK_S_Jackson_NS.jpg&w=480',sha256:String(i),bytes:1000,duplicate:false}));
-            await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({cameraId:camera,hours:6,frames})});
-          });
-          await page.goto(`${process.env.PREVIEW_URL}/?validation=${Date.now()}`,{waitUntil:'networkidle'});
-          await page.locator('.camera-open').first().click();
-          await page.locator('#history-scrubber').waitFor();
-          await page.locator('#history-scrubber').fill('2');
-          await page.waitForTimeout(100);
-          if(await page.locator('#history-frame').isHidden())throw new Error('historical frame did not display');
-          await page.locator('#history-compare').click();
-          await page.locator('#compare-stage').waitFor();
-          await page.locator('#compare-scrubber').fill('70');
-          await page.locator('#history-timelapse').click();
-          await page.waitForTimeout(700);
-          await page.locator('#history-now').click();
-          if(errors.length)throw new Error(errors.join('; '));
-          await browser.close();
-          console.log('Time Machine interaction test passed');
-          JS
-          node tests/time-machine-validation.mjs
-      - name: Lighthouse default path
-        shell: bash
-        run: |
-          for i in 1 2 3; do
-            npx lighthouse "$PREVIEW_URL/?lh=$i" --quiet --chrome-flags='--headless --no-sandbox' --only-categories=performance,accessibility --output=json --output-path="/tmp/lh-$i.json"
-          done
-          node - <<'JS'
-          const fs=require('fs');
-          const runs=[1,2,3].map(i=>JSON.parse(fs.readFileSync(`/tmp/lh-${i}.json`)));
-          const rows=runs.map(r=>({performance:Math.round(r.categories.performance.score*100),a11y:Math.round(r.categories.accessibility.score*100),lcp:Math.round(r.audits['largest-contentful-paint'].numericValue),tbt:Math.round(r.audits['total-blocking-time'].numericValue),cls:r.audits['cumulative-layout-shift'].numericValue}));
-          console.log(rows);
-          if(Math.min(...rows.map(r=>r.performance))<95)process.exit(1);
-          if(Math.min(...rows.map(r=>r.a11y))<100)process.exit(1);
-          if(Math.max(...rows.map(r=>r.cls))>0.05)process.exit(1);
-          JS
+          test "$captured" -eq 1 || { echo 'No scheduled capture arrived'; cat /tmp/status.json; exit 1; }
+
+          npx wrangler d1 execute HISTORY_DB --remote --config wrangler.preview.jsonc --json --command \
+            "SELECT camera_id, r2_key, captured_at FROM camera_snapshots ORDER BY captured_at DESC LIMIT 1" > /tmp/latest.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/latest.json'))
+          rows=[]
+          for result in data if isinstance(data,list) else [data]:
+              rows.extend(result.get('results',[]))
+          if not rows: raise SystemExit('No D1 history rows found')
+          row=rows[0]
+          open('/tmp/camera-id','w').write(row['camera_id'])
+          open('/tmp/r2-key','w').write(row['r2_key'])
+          print(row)
+          PY
+          camera=$(python -c 'import urllib.parse;print(urllib.parse.quote(open("/tmp/camera-id").read(),safe=""))')
+          key=$(python -c 'import urllib.parse;print(urllib.parse.quote(open("/tmp/r2-key").read(),safe=""))')
+          curl -fsSL "$PREVIEW_URL/api/history?camera=$camera&hours=6&limit=10&v=$(date +%s%N)" -o /tmp/timeline.json
+          jq -e '.frames | length > 0' /tmp/timeline.json >/dev/null
+          image_status=$(curl -sS --max-time 15 -o /tmp/history.webp -w '%{http_code}' "$PREVIEW_URL/api/history/image?key=$key")
+          test "$image_status" = 200
+          file /tmp/history.webp
+          test -s /tmp/history.webp
+          echo "Real D1/R2 scheduled capture validated: $(cat /tmp/status.json)"
