@@ -39,6 +39,8 @@ let anomalyUiTimer = null;
 const historicalSeedAttempted = new Set();
 let focusHistory = null;
 let timelapseTimer = null;
+let pulse = null;
+const PULSE_REFRESH_MS = 60000;
 const ANOMALY_START_DELAY = 12000;
 
 const $ = (selector) => document.querySelector(selector);
@@ -56,6 +58,7 @@ const settings = $('#settings');
 const statusLine = $('#status-line');
 const visibleCount = $('#visible-count');
 const sourceError = $('#source-error');
+const pulseEl = $('#pulse');
 
 const COLLECTIONS = [
   ['unusual','Unusual Now','Cameras whose current scene differs materially from their learned recent baseline.'],
@@ -654,6 +657,43 @@ async function loadTimeMachine(camera){
   }
 }
 
+
+function pulseCamera(item) { return cameraById(item.cameraId); }
+function pulseTime(value) {
+  const minutes=Math.max(0,Math.round((Date.now()-value)/60000));
+  return minutes<1?'just now':minutes===1?'1 min ago':`${minutes} min ago`;
+}
+function renderPulse() {
+  if (!pulseEl) return;
+  if (!pulse) {
+    pulseEl.innerHTML='<div class="pulse-loading"><div><p class="eyebrow">Seattle Pulse</p><strong>Reading the city…</strong></div><span>Ranking recent camera changes</span></div>';
+    return;
+  }
+  const items=(pulse.items||[]).filter((item)=>pulseCamera(item)).slice(0,6);
+  const cards=items.map((item,index)=>{
+    const camera=pulseCamera(item);
+    return `<button class="pulse-card" data-pulse-camera="${escapeHtml(item.cameraId)}"><span class="pulse-rank">#${index+1}</span><span class="pulse-thumb"><img src="${imageUrl(camera,480,true)}" alt="" width="160" height="90" loading="lazy"></span><span class="pulse-copy"><strong>${escapeHtml(camera.label)}</strong><small>${escapeHtml(item.reason)} · ${item.transitions} changes · ${pulseTime(item.capturedAt)}</small></span><span class="pulse-score" title="Evidence-based Pulse score">${item.score}</span></button>`;
+  }).join('');
+  pulseEl.innerHTML=`<div class="pulse-head"><div><p class="eyebrow">Seattle Pulse</p><div class="pulse-title"><strong>${escapeHtml(pulse.state)}</strong><span>${pulse.pulseScore}/100</span></div></div><div class="pulse-meta"><span>${pulse.activeCameras} active cameras</span><span>${pulse.camerasAnalyzed} analyzed</span><button id="pulse-refresh" class="chip">Refresh</button></div></div><div class="pulse-rail">${cards||'<div class="pulse-empty">History is still warming up.</div>'}</div><p class="pulse-method">Observed visual change only — Pulse does not infer crashes, congestion, or causes.</p>`;
+  pulseEl.querySelectorAll('[data-pulse-camera]').forEach((button)=>button.addEventListener('click',()=>openFocus(button.dataset.pulseCamera)));
+  $('#pulse-refresh')?.addEventListener('click',()=>loadPulse(true));
+}
+async function loadPulse(force=false) {
+  if (!pulseEl || document.hidden) return;
+  const url=new URL('/api/pulse',location.origin);
+  url.searchParams.set('window','60');url.searchParams.set('limit','12');if(force)url.searchParams.set('_',Date.now());
+  try {
+    const response=await fetch(url,{headers:{Accept:'application/json'}});
+    if(!response.ok)throw new Error(`Pulse returned ${response.status}`);
+    const next=await response.json();
+    if(!Array.isArray(next.items))throw new Error('Unexpected Pulse payload');
+    pulse=next;renderPulse();
+  } catch {
+    if(!pulse)pulseEl.innerHTML='<div class="pulse-loading pulse-error"><div><p class="eyebrow">Seattle Pulse</p><strong>Pulse temporarily unavailable</strong></div><button id="pulse-retry" class="chip">Retry</button></div>';
+    $('#pulse-retry')?.addEventListener('click',()=>loadPulse(true));
+  }
+}
+
 function openFocus(id) {
   const camera=cameraById(id); if (!camera) return;
   destroyVideo(); focusedId=id; updateUrl();
@@ -712,6 +752,7 @@ setInterval(()=>{
   document.querySelectorAll('.camera-card img:not([hidden])').forEach((img)=>{const card=img.closest('.camera-card');const camera=cameraById(card?.dataset.cameraId);if(camera)img.src=imageUrl(camera,480,true);});
 },30000);
 setInterval(()=>loadCameras(false),5*60*1000);
+setInterval(()=>loadPulse(false),PULSE_REFRESH_MS);
 setInterval(()=>{
   if (activeCollections.includes('unusual')) refilter();
   else { renderCollections(); updateCounts(); }
@@ -719,5 +760,6 @@ setInterval(()=>{
 
 hydrateUrl();
 $('#match-all').classList.toggle('active',collectionMode==='all');$('#match-any').classList.toggle('active',collectionMode==='any');
-refilter();setView(view);renderDiagnostics();
+refilter();setView(view);renderDiagnostics();renderPulse();
+queueMicrotask(()=>loadPulse(false));
 if (focusedId) queueMicrotask(()=>openFocus(focusedId));
