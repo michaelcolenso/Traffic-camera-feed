@@ -20,6 +20,24 @@ const gridPlayers = new Map();
 const visibleCards = new Set();
 const MAX_AUTO_LIVE = 4;
 
+const ANOMALY_STORAGE_KEY = 'seattle-traffic-watch:visual-baselines:v1';
+const ANOMALY_HISTORY_LIMIT = 8;
+const ANOMALY_MIN_SAMPLES = 3;
+const ANOMALY_THRESHOLD = 55;
+const ANOMALY_TTL = 3 * 60 * 1000;
+const ANOMALY_WIDTH = 12;
+const ANOMALY_HEIGHT = 8;
+const anomaly = new Map();
+let anomalyHistory = loadAnomalyHistory();
+let anomalyCanvas = null;
+let anomalyContext = null;
+const anomalyQueue = new Map();
+const analyzedSources = new Map();
+let anomalyQueueTimer = null;
+let anomalySaveTimer = null;
+let anomalyUiTimer = null;
+const ANOMALY_START_DELAY = 12000;
+
 const $ = (selector) => document.querySelector(selector);
 const grid = $('#grid');
 const mapEl = $('#map');
@@ -37,6 +55,7 @@ const visibleCount = $('#visible-count');
 const sourceError = $('#source-error');
 
 const COLLECTIONS = [
+  ['unusual','Unusual Now','Cameras whose current scene differs materially from their learned recent baseline.'],
   ['live','Live streams','Cameras with a playable video stream.'],
   ['downtown','Downtown','Likely downtown intersections based on camera labels.'],
   ['bridges','Bridges','Bridge approaches and named bridge cameras.'],
@@ -69,8 +88,135 @@ function noteHealth(camera, kind) {
   renderCollections();
   if (!diagnostics.hidden) renderDiagnostics();
 }
+
+function loadAnomalyHistory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ANOMALY_STORAGE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch { return {}; }
+}
+function saveAnomalyHistory() {
+  if (anomalySaveTimer) return;
+  anomalySaveTimer = setTimeout(() => {
+    anomalySaveTimer = null;
+    try { localStorage.setItem(ANOMALY_STORAGE_KEY, JSON.stringify(anomalyHistory)); } catch {}
+  }, 1200);
+}
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a,b)=>a-b);
+  const middle = Math.floor(sorted.length/2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle-1]+sorted[middle])/2;
+}
+function anomalyState(camera) {
+  const state = anomaly.get(camera.id);
+  if (!state || Date.now() - state.at > ANOMALY_TTL) return null;
+  return state;
+}
+function isUnusual(camera) {
+  const state = anomalyState(camera);
+  return Boolean(state && state.samples >= ANOMALY_MIN_SAMPLES && state.score >= ANOMALY_THRESHOLD);
+}
+function baselineLearnedCount() {
+  return cameras.filter((camera)=>(anomalyHistory[camera.id]?.samples?.length || 0) >= ANOMALY_MIN_SAMPLES).length;
+}
+function fingerprintImage(img) {
+  if (!img.complete || !img.naturalWidth || !img.naturalHeight) return null;
+  anomalyCanvas ||= document.createElement('canvas');
+  anomalyCanvas.width = ANOMALY_WIDTH;
+  anomalyCanvas.height = ANOMALY_HEIGHT;
+  anomalyContext ||= anomalyCanvas.getContext('2d',{willReadFrequently:true});
+  if (!anomalyContext) return null;
+  anomalyContext.drawImage(img,0,0,ANOMALY_WIDTH,ANOMALY_HEIGHT);
+  let pixels;
+  try { pixels = anomalyContext.getImageData(0,0,ANOMALY_WIDTH,ANOMALY_HEIGHT).data; }
+  catch { return null; }
+  const luminance=[];
+  for(let i=0;i<pixels.length;i+=4){
+    luminance.push(Math.round((0.2126*pixels[i]+0.7152*pixels[i+1]+0.0722*pixels[i+2])));
+  }
+  const mean=luminance.reduce((sum,value)=>sum+value,0)/luminance.length;
+  const contrast=Math.sqrt(luminance.reduce((sum,value)=>sum+((value-mean)**2),0)/luminance.length);
+  return {pixels:luminance,mean,contrast};
+}
+function baselineFor(samples) {
+  if (!samples.length) return null;
+  const length=samples[0].pixels.length;
+  const pixels=Array.from({length},(_,index)=>median(samples.map((sample)=>sample.pixels[index])));
+  return {pixels,mean:median(samples.map((sample)=>sample.mean)),contrast:median(samples.map((sample)=>sample.contrast))};
+}
+function scoreFingerprint(current, baseline) {
+  const pixelDiff=current.pixels.reduce((sum,value,index)=>sum+Math.abs(value-baseline.pixels[index]),0)/(current.pixels.length*255);
+  const meanShift=Math.abs(current.mean-baseline.mean)/255;
+  const contrastShift=Math.abs(current.contrast-baseline.contrast)/128;
+  const raw=(pixelDiff*0.78)+(meanShift*0.14)+(contrastShift*0.08);
+  const score=Math.round(Math.max(0,Math.min(1,(raw-0.025)/0.16))*100);
+  let reason='Scene changed more than usual';
+  if (meanShift>0.16) reason=current.mean<baseline.mean?'Scene became much darker':'Scene became much brighter';
+  else if (contrastShift>0.22 && current.contrast<baseline.contrast) reason='Visibility or contrast dropped';
+  else if (pixelDiff>0.16) reason='Large scene change detected';
+  else if (pixelDiff>0.10) reason='Traffic or scene pattern shifted';
+  return {score,reason,pixelDiff,meanShift,contrastShift};
+}
+function updateAnomalyCard(camera) {
+  const cardEl=grid.querySelector(`.camera-card[data-camera-id="${CSS.escape(camera.id)}"]`);
+  const meta=cardEl?.querySelector('.card-copy span');
+  if (!meta) return;
+  const state=anomalyState(camera);
+  meta.textContent=isUnusual(camera)?`Changed ${state.score}`:(camera.videoUrl?'Live':'Snapshot');
+  if (isUnusual(camera)) meta.title=state.reason;
+  else meta.removeAttribute('title');
+}
+function scheduleAnomalyUi() {
+  if (anomalyUiTimer) return;
+  anomalyUiTimer = setTimeout(() => {
+    anomalyUiTimer = null;
+    renderCollections();
+    updateCounts();
+    if (!diagnostics.hidden) renderDiagnostics();
+    if (activeCollections.includes('unusual')) refilter();
+  }, 350);
+}
+function processAnomalyQueue() {
+  anomalyQueueTimer = null;
+  if (document.hidden || !anomalyQueue.size) return;
+  const [id, item] = anomalyQueue.entries().next().value;
+  anomalyQueue.delete(id);
+  analyzeImage(item.camera,item.img);
+  if (anomalyQueue.size) anomalyQueueTimer = setTimeout(processAnomalyQueue,80);
+}
+function queueAnomalyAnalysis(camera,img) {
+  const src = img.currentSrc || img.src;
+  if (!src || analyzedSources.get(camera.id) === src) return;
+  analyzedSources.set(camera.id,src);
+  anomalyQueue.set(camera.id,{camera,img});
+  if (anomalyQueueTimer) return;
+  const delay = Math.max(80, ANOMALY_START_DELAY - performance.now());
+  anomalyQueueTimer = setTimeout(processAnomalyQueue,delay);
+}
+function analyzeImage(camera,img) {
+  const current=fingerprintImage(img);
+  if (!current) return;
+  const record=anomalyHistory[camera.id] || {samples:[]};
+  const previous=Array.isArray(record.samples)?record.samples.slice(-ANOMALY_HISTORY_LIMIT):[];
+  const baseline=baselineFor(previous);
+  if (baseline && previous.length>=ANOMALY_MIN_SAMPLES) {
+    const scored=scoreFingerprint(current,baseline);
+    anomaly.set(camera.id,{...scored,samples:previous.length,at:Date.now()});
+  } else {
+    anomaly.set(camera.id,{score:0,reason:'Learning recent baseline',samples:previous.length,at:Date.now()});
+  }
+  record.samples=[...previous,current].slice(-ANOMALY_HISTORY_LIMIT);
+  record.updatedAt=Date.now();
+  anomalyHistory[camera.id]=record;
+  saveAnomalyHistory();
+  updateAnomalyCard(camera);
+  scheduleAnomalyUi();
+}
+
 function matchesCollection(camera, id) {
   const h = getHealth(camera);
+  if (id === 'unusual') return isUnusual(camera);
   if (id === 'live') return Boolean(camera.videoUrl);
   if (id === 'recent') return Boolean(h.lastImageRefresh && Date.now() - h.lastImageRefresh < 60000);
   if (id === 'issues') return Boolean(h.lastImageError || h.lastStreamError);
@@ -90,6 +236,7 @@ function refilter() {
     const values = activeCollections.map((id) => matchesCollection(camera,id));
     return collectionMode === 'all' ? values.every(Boolean) : values.some(Boolean);
   });
+  if (activeCollections.includes('unusual')) filtered.sort((a,b)=>(anomalyState(b)?.score||0)-(anomalyState(a)?.score||0));
   visible = matchMedia('(min-width:768px)').matches ? 16 : 6;
   stopAllGridVideo();
   renderGrid(true);
@@ -103,7 +250,9 @@ function card(camera, index) {
   const liveControl = camera.videoUrl
     ? `<button class="grid-play" type="button" data-grid-play="${escapeHtml(camera.id)}" aria-label="Play live video for ${escapeHtml(camera.label)}"><span class="play-icon">▶</span><span class="play-label">Play live</span></button>`
     : '';
-  return `<article class="camera-card" data-camera-id="${escapeHtml(camera.id)}"><div class="image-shell"><img src="${imageUrl(camera)}" alt="${escapeHtml(camera.label)}" width="480" height="270" ${index ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async">${liveControl}<span class="live-badge" hidden>LIVE</span></div><button class="camera-open" data-camera="${escapeHtml(camera.id)}" aria-label="View ${escapeHtml(camera.label)}"><div class="card-copy"><h2>${escapeHtml(camera.label)}</h2><span>${camera.videoUrl ? 'Live' : 'Snapshot'}</span></div></button></article>`;
+  const state=anomalyState(camera);
+  const meta=isUnusual(camera)?`Changed ${state.score}`:(camera.videoUrl?'Live':'Snapshot');
+  return `<article class="camera-card" data-camera-id="${escapeHtml(camera.id)}"><div class="image-shell"><img src="${imageUrl(camera)}" alt="${escapeHtml(camera.label)}" width="480" height="270" ${index ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async">${liveControl}<span class="live-badge" hidden>LIVE</span></div><button class="camera-open" data-camera="${escapeHtml(camera.id)}" aria-label="View ${escapeHtml(camera.label)}"><div class="card-copy"><h2>${escapeHtml(camera.label)}</h2><span${state?.reason?` title="${escapeHtml(state.reason)}"`:''}>${meta}</span></div></button></article>`;
 }
 function bindImageHealth(root = grid) {
   root.querySelectorAll('.camera-card img').forEach((img) => {
@@ -111,8 +260,9 @@ function bindImageHealth(root = grid) {
     img.dataset.healthBound = '1';
     const camera = cameraById(img.closest('.camera-card')?.dataset.cameraId);
     if (!camera) return;
-    img.addEventListener('load', () => noteHealth(camera,'refresh'));
+    img.addEventListener('load', () => { noteHealth(camera,'refresh'); queueAnomalyAnalysis(camera,img); });
     img.addEventListener('error', () => noteHealth(camera,'image-error'));
+    if (img.complete && img.naturalWidth) queueAnomalyAnalysis(camera,img);
   });
 }
 const cardObserver = new IntersectionObserver((entries) => {
@@ -160,14 +310,17 @@ function renderCollections() {
   }).join('') + (activeCollections.length ? '<button class="chip" data-clear-collections>Clear all</button>' : '') + `<button class="chip live-grid-toggle ${liveGridEnabled?'active':''}" data-live-grid aria-pressed="${liveGridEnabled}" title="Autoplay up to ${MAX_AUTO_LIVE} visible live cameras, muted">${liveGridEnabled?'● Live Grid on':'▶ Live Grid'}</button>`;
 }
 function issueCount() { return [...health.values()].filter((h) => h.lastImageError || h.lastStreamError).length; }
+function unusualCount() { return cameras.filter(isUnusual).length; }
 function updateCounts() {
   visibleCount.textContent = `${filtered.length} visible / ${cameras.length} total`;
-  statusLine.textContent = `${cameras.length} cameras · ${source === 'arcgis' ? 'ArcGIS' : 'SDOT Socrata'} source · ${cameras.filter(c=>c.videoUrl).length} live`;
+  const unusual=unusualCount();
+  statusLine.textContent = `${cameras.length} cameras · ${source === 'arcgis' ? 'ArcGIS' : 'SDOT Socrata'} source · ${cameras.filter(c=>c.videoUrl).length} live${unusual?` · ${unusual} unusual`:''}`;
   $('#diagnostics-toggle').textContent = `Diagnostics · ${issueCount()} issues`;
 }
 function renderDiagnostics() {
-  diagnostics.innerHTML = `<div><span>Total cameras</span><strong>${cameras.length}</strong></div><div><span>Live streams</span><strong>${cameras.filter(c=>c.videoUrl).length}</strong></div><div><span>Signal issues</span><strong>${issueCount()}</strong></div><div><span>Last sync</span><strong>${new Date(lastSync).toLocaleTimeString()}</strong></div><button id="refresh-feed" class="chip accent">Refresh feed</button>`;
+  diagnostics.innerHTML = `<div><span>Total cameras</span><strong>${cameras.length}</strong></div><div><span>Live streams</span><strong>${cameras.filter(c=>c.videoUrl).length}</strong></div><div><span>Unusual now</span><strong>${unusualCount()}</strong></div><div><span>Baselines learned</span><strong>${baselineLearnedCount()}</strong></div><div><span>Signal issues</span><strong>${issueCount()}</strong></div><div><span>Last sync</span><strong>${new Date(lastSync).toLocaleTimeString()}</strong></div><button id="refresh-feed" class="chip accent">Refresh feed</button><button id="reset-baselines" class="chip">Reset visual baselines</button>`;
   $('#refresh-feed')?.addEventListener('click', () => loadCameras(true));
+  $('#reset-baselines')?.addEventListener('click',()=>{anomalyHistory={};anomaly.clear();saveAnomalyHistory();refilter();renderDiagnostics();});
 }
 function updateUrl() {
   const params = new URLSearchParams();
@@ -380,7 +533,9 @@ function openFocus(id) {
   destroyVideo(); focusedId=id; updateUrl();
   const set=filtered.length?filtered:cameras;const index=set.findIndex((c)=>c.id===id);const prev=set[(index-1+set.length)%set.length];const next=set[(index+1)%set.length];
   const nearby=nearest(camera).map((c)=>`<button class="nearby-camera" data-focus="${escapeHtml(c.id)}">${escapeHtml(c.label)}</button>`).join('');
-  modalBody.innerHTML=`<div class="focus-head"><p class="eyebrow">Camera focus</p><h2>${escapeHtml(camera.label)}</h2></div><div class="focus-media">${camera.videoUrl?`<video id="focus-video" controls playsinline poster="${imageUrl(camera,960,true)}"></video>`:`<img src="${imageUrl(camera,960,true)}" alt="${escapeHtml(camera.label)}" width="960" height="540">`}</div><div class="focus-actions"><button class="chip" data-focus="${escapeHtml(prev?.id||id)}">← Previous</button><button id="refresh-focus" class="chip">Refresh snapshot</button><button class="chip" data-focus="${escapeHtml(next?.id||id)}">Next →</button>${camera.webUrl?`<a class="chip" href="${escapeHtml(camera.webUrl)}" target="_blank" rel="noopener noreferrer">SDOT page</a>`:''}</div>${nearby?`<div class="nearby"><p>Nearby cameras</p>${nearby}</div>`:''}`;
+  const state=anomalyState(camera);
+  const anomalyCopy=state&&state.samples>=ANOMALY_MIN_SAMPLES?`<p class="sub">Visual change score ${state.score}/100 · ${escapeHtml(state.reason)}</p>`:'';
+  modalBody.innerHTML=`<div class="focus-head"><p class="eyebrow">Camera focus</p><h2>${escapeHtml(camera.label)}</h2>${anomalyCopy}</div><div class="focus-media">${camera.videoUrl?`<video id="focus-video" controls playsinline poster="${imageUrl(camera,960,true)}"></video>`:`<img src="${imageUrl(camera,960,true)}" alt="${escapeHtml(camera.label)}" width="960" height="540">`}</div><div class="focus-actions"><button class="chip" data-focus="${escapeHtml(prev?.id||id)}">← Previous</button><button id="refresh-focus" class="chip">Refresh snapshot</button><button class="chip" data-focus="${escapeHtml(next?.id||id)}">Next →</button>${camera.webUrl?`<a class="chip" href="${escapeHtml(camera.webUrl)}" target="_blank" rel="noopener noreferrer">SDOT page</a>`:''}</div>${nearby?`<div class="nearby"><p>Nearby cameras</p>${nearby}</div>`:''}`;
   if (!modal.open) modal.showModal();
   $('#refresh-focus')?.addEventListener('click',()=>{const media=$('#focus-video')||modalBody.querySelector('img');if(media){if(media.tagName==='IMG')media.src=imageUrl(camera,960,true);else media.poster=imageUrl(camera,960,true);}});
   if (camera.videoUrl) setupVideo(camera);
@@ -429,6 +584,10 @@ setInterval(()=>{
   document.querySelectorAll('.camera-card img:not([hidden])').forEach((img)=>{const card=img.closest('.camera-card');const camera=cameraById(card?.dataset.cameraId);if(camera)img.src=imageUrl(camera,480,true);});
 },30000);
 setInterval(()=>loadCameras(false),5*60*1000);
+setInterval(()=>{
+  if (activeCollections.includes('unusual')) refilter();
+  else { renderCollections(); updateCounts(); }
+},30000);
 
 hydrateUrl();
 $('#match-all').classList.toggle('active',collectionMode==='all');$('#match-any').classList.toggle('active',collectionMode==='any');
