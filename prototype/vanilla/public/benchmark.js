@@ -155,14 +155,14 @@ const cardObserver = new IntersectionObserver((entries) => {
     const cardEl = entry.target;
     const id = cardEl.dataset.cameraId;
     if (!id) continue;
-    if (entry.isIntersecting && entry.intersectionRatio >= 0.25) visibleCards.add(id);
+    if (entry.isIntersecting && entry.intersectionRatio >= 0.05) visibleCards.add(id);
     else {
       visibleCards.delete(id);
       if (gridPlayers.has(id)) stopGridVideo(id);
     }
   }
   if (liveGridEnabled && view === 'grid') syncLiveGrid();
-}, {threshold:[0,0.25,0.6],rootMargin:'80px 0px'});
+}, {threshold:[0,0.05,0.25,0.6],rootMargin:'80px 0px'});
 function observeCards(root = grid) {
   root.querySelectorAll('.camera-card').forEach((cardEl) => {
     if (cardEl.dataset.liveObserved) return;
@@ -537,7 +537,8 @@ async function loadPulse(force=false) {
     const next=await response.json();
     if(!Array.isArray(next.items))throw new Error('Unexpected Pulse payload');
     pulse=next;
-    pulseByCamera=new Map(next.items.map((item)=>[item.cameraId,item]));
+    const observationIndex=Array.isArray(next.observationIndex)?next.observationIndex:next.items;
+    pulseByCamera=new Map(observationIndex.map((item)=>[item.cameraId,item]));
     renderPulse();
     if (activeCollections.includes('unusual')) refilter();
     else {
