@@ -428,6 +428,16 @@ export async function handlePulseRequest(request: Request, url: URL, env: PulseB
   const top = all.slice(0, Math.min(10, all.length));
   const pulseScore = top.length ? Math.round(top.reduce((sum, item) => sum + item.score, 0) / top.length) : 0;
   const state = events.length >= 3 || pulseScore >= 65 ? 'high activity' : events.length || pulseScore >= 40 ? 'active' : pulseScore >= 20 ? 'some movement' : 'quiet';
+  const observationIndex = all.map((item) => ({
+    cameraId: item.cameraId,
+    capturedAt: item.capturedAt,
+    score: item.score,
+    reason: item.reason,
+    state: item.state,
+    severity: item.severity,
+    confidence: item.confidence,
+    display: item.display,
+  }));
 
   return json({
     generatedAt: now,
@@ -439,6 +449,7 @@ export async function handlePulseRequest(request: Request, url: URL, env: PulseB
     observationCount: all.length,
     eventCount: events.length,
     methodology: 'Ranks deterministic visual observations using recent camera baselines, persistence, severity, confidence and freshness. Nearby qualifying observations may be correlated. It does not infer crashes, congestion, weather, incidents or causes.',
+    observationIndex,
     events,
     items,
   });
