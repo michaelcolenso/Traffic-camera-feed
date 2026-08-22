@@ -73,7 +73,10 @@ try {
   check(autoCount > 0, 'Live Grid did not start any visible streams');
   check(autoCount <= 4, `Live Grid exceeded four-stream cap (${autoCount})`);
   check(await page.locator('[data-live-grid]').getAttribute('aria-pressed') === 'true', 'Live Grid pressed state missing');
-  if (autoCount) check(await autoVideos.first().evaluate((video) => video.muted && video.playsInline), 'Live Grid video is not muted and inline');
+  if (autoCount) {
+    check(await autoVideos.first().evaluate((video) => video.muted && video.playsInline), 'Live Grid video is not muted and inline');
+    check(await autoVideos.first().evaluate((video) => (video.closest('.camera-card')?.getBoundingClientRect().top ?? Infinity) <= innerHeight + 720), 'Live Grid started outside viewport prewarm window');
+  }
   await page.locator('[data-live-grid]').click();
   await page.waitForTimeout(30);
   check(await page.locator('.camera-card.is-live .grid-video').count() === 0, 'Live Grid auto streams did not stop when disabled');
