@@ -35,12 +35,16 @@ jobs:
       - name: TypeScript check
         run: npm run lint
 
+      - name: Browser module syntax check
+        run: node --check prototype/vanilla/public/benchmark.js
+
       - name: Validate production Wrangler configuration
         run: |
           npx wrangler types worker-configuration.d.ts --config wrangler.jsonc
           test -s worker-configuration.d.ts
           grep -q 'HISTORY_DB' worker-configuration.d.ts
           grep -q 'HISTORY_BUCKET' worker-configuration.d.ts
+          grep -q 'IMAGES' worker-configuration.d.ts
 
       - name: Verify Cloudflare credentials
         env:
@@ -75,19 +79,21 @@ jobs:
             js_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-js -w '%{http_code}' "https://cams.hoxel.dev/benchmark.js?smoke=${nonce}" || true)"
             api_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-cameras -w '%{http_code}' "https://cams.hoxel.dev/api/cameras?source=arcgis&smoke=${nonce}" || true)"
             history_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-history -w '%{http_code}' "https://cams.hoxel.dev/api/history/status?smoke=${nonce}" || true)"
-            echo "Production readiness ${attempt}/12: home=${home_status}, js=${js_status}, cameras=${api_status}, history=${history_status}"
-            if [ "$home_status" = "200" ] && [ "$js_status" = "200" ] && [ "$api_status" = "200" ] && [ "$history_status" = "200" ] \
+            pulse_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-pulse -w '%{http_code}' "https://cams.hoxel.dev/api/pulse?limit=24&smoke=${nonce}" || true)"
+            echo "Production readiness ${attempt}/12: home=${home_status}, js=${js_status}, cameras=${api_status}, history=${history_status}, pulse=${pulse_status}"
+            if [ "$home_status" = "200" ] && [ "$js_status" = "200" ] && [ "$api_status" = "200" ] && [ "$history_status" = "200" ] && [ "$pulse_status" = "200" ] \
               && grep -q 'Seattle Traffic Watch' /tmp/cams-home \
               && grep -q 'window.__CAMERAS__=' /tmp/cams-home \
               && grep -q 'data-collection="live"' /tmp/cams-home \
-              && jq -e 'type == "array" and length > 0' /tmp/cams-cameras >/dev/null \
-              && jq -e 'has("frames") and has("cameras") and has("latest")' /tmp/cams-history >/dev/null; then
+              && jq -e 'type == "array" and length > 0 and (.[0].collections | type == "array")' /tmp/cams-cameras >/dev/null \
+              && jq -e 'has("frames") and has("cameras") and has("latest")' /tmp/cams-history >/dev/null \
+              && jq -e '(.items | type == "array") and (.events | type == "array") and has("camerasAnalyzed")' /tmp/cams-pulse >/dev/null; then
               home_ok=1
               break
             fi
             sleep 5
           done
-          test "$home_ok" -eq 1 || { echo "cams.hoxel.dev did not become healthy"; cat /tmp/cams-history || true; exit 1; }
+          test "$home_ok" -eq 1 || { echo "cams.hoxel.dev did not become healthy"; cat /tmp/cams-history || true; cat /tmp/cams-pulse || true; exit 1; }
 
           video_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-video -w '%{http_code}' https://cams.hoxel.dev/api/video)"
           test "$video_status" = "400" || { echo "Expected /api/video without a URL to return 400, got ${video_status}"; cat /tmp/cams-video; exit 1; }
@@ -119,7 +125,7 @@ jobs:
           done
           test "$timeline_ok" -eq 1 || { echo "History timeline did not become healthy"; cat /tmp/cams-timeline || true; exit 1; }
 
-          echo "Core production smoke test passed: app, cameras, images, D1/R2 history API, and timeline endpoint are healthy"
+          echo "Core production smoke test passed: app, canonical cameras, images, D1/R2 history, Pulse, and timeline endpoints are healthy"
 
           # Live HLS is an external dependency. Probe several current streams for visibility,
           # but do not fail a healthy deployment when Seattle's streaming origin is unavailable.

@@ -21,6 +21,9 @@
       "custom_domain": true
     }
   ],
+  "images": {
+    "binding": "IMAGES"
+  },
   "assets": {
     "directory": "./prototype/vanilla/public",
     "binding": "ASSETS",

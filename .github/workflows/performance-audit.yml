@@ -136,11 +136,11 @@ jobs:
 
           for index, mobile in enumerate(mobiles, start=1):
               checks = [
-                  (f'mobile {index} performance', score(mobile, 'performance'), 85, '>='),
+                  (f'mobile {index} performance', score(mobile, 'performance'), 95, '>='),
                   (f'mobile {index} accessibility', score(mobile, 'accessibility'), 100, '>='),
-                  (f'mobile {index} LCP ms', numeric(mobile, 'largest-contentful-paint'), 4000, '<='),
-                  (f'mobile {index} TBT ms', numeric(mobile, 'total-blocking-time'), 1000, '<='),
-                  (f'mobile {index} CLS', numeric(mobile, 'cumulative-layout-shift'), 0.1, '<='),
+                  (f'mobile {index} LCP ms', numeric(mobile, 'largest-contentful-paint'), 2500, '<='),
+                  (f'mobile {index} TBT ms', numeric(mobile, 'total-blocking-time'), 200, '<='),
+                  (f'mobile {index} CLS', numeric(mobile, 'cumulative-layout-shift'), 0.05, '<='),
               ]
               for name, actual, limit, op in checks:
                   passed = actual >= limit if op == '>=' else actual <= limit
@@ -149,7 +149,7 @@ jobs:
                       failures.append(f'{name}: {actual:.2f} (required {op} {limit})')
 
           desktop_checks = [
-              ('desktop performance', score(desktop, 'performance'), 90, '>='),
+              ('desktop performance', score(desktop, 'performance'), 95, '>='),
               ('desktop accessibility', score(desktop, 'accessibility'), 100, '>='),
           ]
           for name, actual, limit, op in desktop_checks:

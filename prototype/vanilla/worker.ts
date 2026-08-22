@@ -9,10 +9,18 @@ const VIDEO_FETCH_TIMEOUT_MS = 7000;
 const CAMERA_HOST = 'www.seattle.gov';
 const CAMERA_PREFIX = '/trafficcams/images/';
 
+const DOWNTOWN_BOUNDS = {
+  south: 47.593,
+  north: 47.6235,
+  west: -122.356,
+  east: -122.323,
+};
+
 type Camera = {
   id: string;
   label: string;
   imagePath: string;
+  collections: string[];
   stream?: string;
   videoUrl?: string;
   directVideoUrl?: string;
@@ -57,6 +65,34 @@ function safeCameraPath(rawUrl: string): string | null {
   }
 }
 
+function isDowntownCoordinate(lat: number, lng: number): boolean {
+  return Number.isFinite(lat)
+    && Number.isFinite(lng)
+    && lat >= DOWNTOWN_BOUNDS.south
+    && lat <= DOWNTOWN_BOUNDS.north
+    && lng >= DOWNTOWN_BOUNDS.west
+    && lng <= DOWNTOWN_BOUNDS.east;
+}
+
+function classifyCamera(label: string, lat: number, lng: number): string[] {
+  const value = label
+    .toLowerCase()
+    .replace(/[–—]/g, '-')
+    .replace(/[.,/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const collections: string[] = [];
+
+  const downtownStreet = /\b(?:1st|2nd|3rd|4th|5th|6th|7th|8th|9th)\s+(?:ave|avenue)\b|\b(?:pike|pine|union|university|seneca|spring|madison|marion|columbia|cherry|james|yesler)\s+(?:st|street)\b/;
+  if (value.includes('downtown') || (isDowntownCoordinate(lat, lng) && downtownStreet.test(value))) collections.push('downtown');
+
+  if (/\bbridge\b|\bfremont\b|\bballard\b|\bmontlake\b|\buniversity bridge\b|\bspokane st(?:reet)?\b|\bwest seattle bridge\b/.test(value)) collections.push('bridges');
+  if (/\b(?:i-?5|interstate\s*5)\b/.test(value)) collections.push('i5');
+  if (/\b(?:aurora(?: ave(?:nue)?)?|sr-?\s*99|state route\s*99|highway\s*99|hwy\s*99|99)\b/.test(value)) collections.push('aurora');
+
+  return collections;
+}
+
 function normalizeArcGIS(data: ArcResponse): Camera[] {
   if (data.error?.message) throw new Error(data.error.message);
   const cameras: Camera[] = [];
@@ -74,6 +110,7 @@ function normalizeArcGIS(data: ArcResponse): Camera[] {
       id: cameraId(String(attrs.NAME || imagePath)),
       label,
       imagePath,
+      collections: classifyCamera(label, lat, lng),
       stream,
       videoUrl: stream ? `/api/video?url=${encodeURIComponent(`/live/${stream}.stream/playlist.m3u8`)}` : undefined,
       directVideoUrl: stream ? `${VIDEO_ORIGIN}/live/${encodeURIComponent(stream)}.stream/playlist.m3u8` : undefined,
@@ -97,6 +134,7 @@ function normalizeSdot(rows: SdotCamera[]): Camera[] {
       id: cameraId(String(row.web_url?.url || videoUrl || row.imageurl?.url || label)),
       label,
       imagePath,
+      collections: classifyCamera(label, lat, lng),
       videoUrl,
       directVideoUrl: videoUrl,
       webUrl: row.web_url?.url,
@@ -153,26 +191,27 @@ function card(camera: Camera, index: number): string {
   </article>`;
 }
 
-const INITIAL_COLLECTIONS: Array<[string, string, string[]]> = [
-  ['live', 'Live streams', []],
-  ['downtown', 'Downtown', ['downtown', '5th', '4th', '3rd', '2nd', '1st', 'pike', 'pine', 'union', 'madison', 'james']],
-  ['bridges', 'Bridges', ['bridge', 'fremont', 'ballard', 'montlake', 'spokane', 'west seattle', 'university']],
-  ['i5', 'I-5', ['i-5', 'i5', 'interstate 5']],
-  ['aurora', 'Aurora / 99', ['aurora', 'sr 99', 'sr99', '99']],
-  ['recent', 'Recently refreshed', []],
-  ['issues', 'Signal issues', []],
+const INITIAL_COLLECTIONS: Array<[string, string]> = [
+  ['live', 'Live streams'],
+  ['downtown', 'Downtown'],
+  ['bridges', 'Bridges'],
+  ['i5', 'I-5'],
+  ['aurora', 'Aurora / 99'],
+  ['recent', 'Recently refreshed'],
+  ['issues', 'Signal issues'],
 ];
 
-function initialCollectionCount(cameras: Camera[], id: string, keywords: string[]): number {
+function initialCollectionCount(cameras: Camera[], id: string): number {
   if (id === 'live') return cameras.filter((camera) => Boolean(camera.videoUrl)).length;
   if (id === 'recent' || id === 'issues') return 0;
-  return cameras.filter((camera) => keywords.some((keyword) => camera.label.toLowerCase().includes(keyword))).length;
+  return cameras.filter((camera) => camera.collections.includes(id)).length;
 }
 
 function initialCollectionButtons(cameras: Camera[]): string {
-  return INITIAL_COLLECTIONS.map(([id, label, keywords]) => {
-    const count = initialCollectionCount(cameras, id, keywords);
-    return `<button class="chip" data-collection="${id}" aria-pressed="false">${esc(label)} <span>${count}</span></button>`;
+  return INITIAL_COLLECTIONS.flatMap(([id, label]) => {
+    const count = initialCollectionCount(cameras, id);
+    if (!count && !['live', 'recent', 'issues'].includes(id)) return [];
+    return [`<button class="chip" data-collection="${id}" aria-pressed="false">${esc(label)} <span>${count}</span></button>`];
   }).join('');
 }
 
@@ -185,6 +224,7 @@ function page(cameras: Camera[]): Response {
     <title>Seattle Traffic Watch</title>
     <meta name="description" content="Fast, filterable Seattle traffic camera snapshots and live feeds.">
     <link rel="stylesheet" href="/benchmark.css">
+    <link rel="stylesheet" href="/evidence.css">
   </head><body>
     <header class="topbar">
       <div class="brand"><p class="eyebrow">Seattle traffic telemetry</p><h1>Seattle Traffic Watch</h1><p id="status-line" class="sub">${cameras.length} cameras · ArcGIS source</p></div>

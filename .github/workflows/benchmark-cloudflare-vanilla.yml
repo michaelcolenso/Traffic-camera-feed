@@ -4,13 +4,16 @@ on:
   push:
     branches:
       - prototype/cloudflare-vanilla
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: vanilla-architecture-benchmark
+  group: vanilla-architecture-benchmark-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -24,17 +27,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-
       - name: Existing TypeScript regression check
         run: npm run lint
-
+      - name: Browser module syntax check
+        run: node --check prototype/vanilla/public/benchmark.js
       - name: Validate prototype and production Wrangler configurations
         run: |
           npx wrangler types prototype/vanilla/worker-configuration.d.ts --config prototype/vanilla/wrangler.jsonc
           test -s prototype/vanilla/worker-configuration.d.ts
           npx wrangler types worker-configuration.d.ts --config wrangler.jsonc
           test -s worker-configuration.d.ts
-
       - name: Deploy isolated vanilla Worker
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -47,7 +49,6 @@ jobs:
           test -n "$url" || { echo 'Could not determine workers.dev preview URL'; cat /tmp/vanilla-deploy.log; exit 1; }
           echo "VANILLA_URL=$url" >> "$GITHUB_ENV"
           echo "Vanilla prototype: $url" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Smoke test prototype
         shell: bash
         run: |
@@ -58,75 +59,93 @@ jobs:
             js_status="$(curl --silent --show-error --max-time 15 -o /tmp/vanilla.js -w '%{http_code}' "$VANILLA_URL/benchmark.js" || true)"
             api_status="$(curl --silent --show-error --max-time 15 -o /tmp/cameras.json -w '%{http_code}' "$VANILLA_URL/api/cameras?source=arcgis" || true)"
             echo "Preview readiness ${attempt}/12: home=${home_status}, js=${js_status}, api=${api_status}"
-            if [ "$home_status" = 200 ] && [ "$js_status" = 200 ] && [ "$api_status" = 200 ] \
-              && grep -q 'Seattle Traffic Watch' /tmp/vanilla.html \
-              && grep -q 'window.__CAMERAS__=' /tmp/vanilla.html \
-              && grep -q 'data-collection="live"' /tmp/vanilla.html \
-              && grep -q 'map-view' /tmp/vanilla.html; then
+            if [ "$home_status" = 200 ] && [ "$js_status" = 200 ] && [ "$api_status" = 200 ] && grep -q 'Seattle Traffic Watch' /tmp/vanilla.html && grep -q 'window.__CAMERAS__=' /tmp/vanilla.html && grep -q 'data-collection="live"' /tmp/vanilla.html && grep -q 'map-view' /tmp/vanilla.html; then
               ready=1
               break
             fi
             sleep 3
           done
           test "$ready" -eq 1 || { echo 'Vanilla preview did not become healthy'; head -c 500 /tmp/vanilla.html || true; exit 1; }
-
       - name: Feature parity browser checks
         run: |
           npx playwright install chromium --with-deps >/dev/null
           node tests/vanilla-parity.mjs
-
-      - name: Benchmark React production and vanilla replacement
+      - name: Benchmark candidate
         shell: bash
         run: |
           set -euo pipefail
-          for app in react vanilla; do
-            if [ "$app" = react ]; then url='https://cams.hoxel.dev/'; else url="$VANILLA_URL/"; fi
-            for sample in 1 2 3; do
-              echo "Lighthouse $app sample $sample"
-              npx --yes lighthouse@latest "$url" \
-                --chrome-flags='--headless --no-sandbox --disable-dev-shm-usage' \
-                --output=json \
-                --output-path="./lh-${app}-${sample}.json" \
-                --quiet
-            done
+          for sample in 1 2 3; do
+            echo "Lighthouse vanilla sample $sample"
+            timeout --kill-after=10s 120s npx --yes lighthouse@latest "$VANILLA_URL/" \
+              --chrome-flags='--headless --no-sandbox --disable-dev-shm-usage' \
+              --only-categories=performance,accessibility \
+              --max-wait-for-load=45000 \
+              --output=json \
+              --output-path="./lh-vanilla-${sample}.json" \
+              --quiet
           done
-
+      - name: Benchmark production comparison
+        shell: bash
+        run: |
+          set -u
+          for sample in 1 2 3; do
+            echo "Lighthouse react sample $sample"
+            if ! timeout --kill-after=10s 90s npx --yes lighthouse@latest 'https://cams.hoxel.dev/' \
+              --chrome-flags='--headless --no-sandbox --disable-dev-shm-usage' \
+              --only-categories=performance,accessibility \
+              --max-wait-for-load=45000 \
+              --output=json \
+              --output-path="./lh-react-${sample}.json" \
+              --quiet; then
+              echo "Production comparison sample $sample unavailable; candidate gate continues."
+              rm -f "./lh-react-${sample}.json"
+            fi
+          done
       - name: Publish comparison and enforce replacement budget
         shell: python
         run: |
           import json, os, statistics, sys
-          def row(app, i):
-              with open(f'lh-{app}-{i}.json') as f: r=json.load(f)
+          def row(path):
+              with open(path) as f:
+                  r=json.load(f)
               a=r['audits']; c=r['categories']
               return {
-                'score': round(c['performance']['score']*100),
-                'a11y': round(c['accessibility']['score']*100),
-                'fcp': a['first-contentful-paint']['numericValue'],
-                'lcp': a['largest-contentful-paint']['numericValue'],
-                'tbt': a['total-blocking-time']['numericValue'],
-                'cls': a['cumulative-layout-shift']['numericValue'],
-                'bytes': a.get('total-byte-weight',{}).get('numericValue',0),
+                  'score': round(c['performance']['score']*100),
+                  'a11y': round(c['accessibility']['score']*100),
+                  'fcp': a['first-contentful-paint']['numericValue'],
+                  'lcp': a['largest-contentful-paint']['numericValue'],
+                  'tbt': a['total-blocking-time']['numericValue'],
+                  'cls': a['cumulative-layout-shift']['numericValue'],
+                  'bytes': a.get('total-byte-weight',{}).get('numericValue',0),
               }
-          data={app:[row(app,i) for i in (1,2,3)] for app in ('react','vanilla')}
+          def rows(app):
+              result=[]
+              for i in (1,2,3):
+                  path=f'lh-{app}-{i}.json'
+                  if os.path.exists(path): result.append(row(path))
+              return result
+          data={app:rows(app) for app in ('react','vanilla')}
           with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
-              f.write('\n## React vs Cloudflare-native feature-parity replacement\n\n')
-              f.write('| App | Scores | Min | Median | LCP median | TBT median | CLS max | Transfer median | A11y min |\n')
-              f.write('|---|---|---:|---:|---:|---:|---:|---:|---:|\n')
-              for app, rows in data.items():
-                  scores=[x['score'] for x in rows]
-                  f.write(f"| {app.title()} | {' / '.join(map(str,scores))} | {min(scores)} | {statistics.median(scores):g} | {statistics.median(x['lcp'] for x in rows)/1000:.2f}s | {statistics.median(x['tbt'] for x in rows):.0f}ms | {max(x['cls'] for x in rows):.3f} | {statistics.median(x['bytes'] for x in rows)/1024:.0f} KiB | {min(x['a11y'] for x in rows)} |\n")
+              f.write('\n## Production vs Cloudflare-native candidate\n\n')
+              f.write('| App | Samples | Scores | Min | Median | LCP median | TBT median | CLS max | Transfer median | A11y min |\n')
+              f.write('|---|---:|---|---:|---:|---:|---:|---:|---:|---:|\n')
+              for app, values in data.items():
+                  if not values:
+                      f.write(f'| {app.title()} | 0 | unavailable | — | — | — | — | — | — | — |\n')
+                      continue
+                  scores=[x['score'] for x in values]
+                  f.write(f"| {app.title()} | {len(values)} | {' / '.join(map(str,scores))} | {min(scores)} | {statistics.median(scores):g} | {statistics.median(x['lcp'] for x in values)/1000:.2f}s | {statistics.median(x['tbt'] for x in values):.0f}ms | {max(x['cls'] for x in values):.3f} | {statistics.median(x['bytes'] for x in values)/1024:.0f} KiB | {min(x['a11y'] for x in values)} |\n")
           print(json.dumps(data, indent=2))
-          v=data['vanilla']
-          failures=[]
-          if min(x['score'] for x in v) < 95: failures.append('minimum Lighthouse performance must be >=95')
-          if statistics.median(x['lcp'] for x in v) > 2500: failures.append('median LCP must be <=2.5s')
-          if statistics.median(x['tbt'] for x in v) > 100: failures.append('median TBT must be <=100ms')
-          if max(x['cls'] for x in v) > 0.05: failures.append('max CLS must be <=0.05')
-          if min(x['a11y'] for x in v) < 98: failures.append('accessibility must be >=98')
+          v=data['vanilla']; failures=[]
+          if len(v) != 3: failures.append('three candidate Lighthouse samples are required')
+          if v and min(x['score'] for x in v) < 95: failures.append('minimum Lighthouse performance must be >=95')
+          if v and statistics.median(x['lcp'] for x in v) > 2500: failures.append('median LCP must be <=2.5s')
+          if v and statistics.median(x['tbt'] for x in v) > 100: failures.append('median TBT must be <=100ms')
+          if v and max(x['cls'] for x in v) > 0.05: failures.append('max CLS must be <=0.05')
+          if v and min(x['a11y'] for x in v) < 98: failures.append('accessibility must be >=98')
           if failures:
               print('\n'.join(failures), file=sys.stderr)
               sys.exit(1)
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
