@@ -1,0 +1,31 @@
+/* Evidence-first refinements layered after benchmark.css. */
+.image-shell[data-camera-open]{cursor:pointer;outline:none}
+.image-shell[data-camera-open]:focus-visible{box-shadow:inset 0 0 0 2px #67e8f9}
+
+/* Before/After uses two identically registered full-stage images. */
+.compare-stage{--split:50%;position:absolute;inset:0;z-index:4;overflow:hidden;background:#020617}
+.compare-stage>.compare-now-image,.compare-stage>.compare-before-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#020617}
+.compare-stage>.compare-before-image{z-index:2;clip-path:inset(0 calc(100% - var(--split)) 0 0)}
+.compare-divider{position:absolute;z-index:4;top:0;bottom:0;left:var(--split);width:2px;background:#67e8f9;transform:translateX(-1px);box-shadow:0 0 12px rgba(103,232,249,.7)}
+.compare-label{z-index:5}
+
+/* Server-authoritative Pulse evidence. */
+.pulse-card[data-observation-state="persistent"]{border-color:rgba(103,232,249,.5);box-shadow:inset 0 0 0 1px rgba(34,211,238,.08)}
+.pulse-card[data-observation-severity="high"] .pulse-copy small{color:#e2e8f0}
+.phase2-confidence{display:inline-block;margin-left:.35rem;color:#67e8f9;text-transform:uppercase;letter-spacing:.04em;font-size:.58rem}
+.phase2-events{display:flex;gap:.45rem;overflow-x:auto;padding:.15rem 0 .75rem;scrollbar-width:thin}
+.phase2-event{flex:0 0 auto;max-width:22rem;border:1px solid rgba(103,232,249,.22);background:rgba(8,47,73,.22);border-radius:.72rem;padding:.5rem .65rem;color:#cbd5e1;font-size:.68rem}
+.phase2-event[data-severity="high"]{border-color:rgba(103,232,249,.48);background:rgba(8,47,73,.34)}
+.phase2-event strong{display:block;color:#cffafe;font-size:.72rem;margin-bottom:.12rem}
+.phase2-event span{color:#94a3b8}
+.phase2-evidence{color:#67e8f9;font-weight:700;white-space:nowrap}
+.camera-marker.changed{border-color:#fbbf24;box-shadow:0 0 0 3px rgba(251,191,36,.14),0 0 13px rgba(251,191,36,.48)}
+
+@media(max-width:640px){
+  /* Bottom dock owns navigation on phones; keep the header focused on identity + search. */
+  .header-actions>.view-toggle,.header-actions>#settings-toggle{display:none}
+  .header-actions{display:block}
+  .search-wrap{display:block;width:100%}
+  .phase2-event{max-width:17rem}
+  .pulse-meta{gap:.35rem}
+}
