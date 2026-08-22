@@ -432,8 +432,12 @@ function setLiveGrid(enabled) {
     for (const [id,player] of [...gridPlayers]) {
       if (player.mode === 'auto') stopGridVideo(id);
     }
-  } else if (!grid.hidden) {
-    syncLiveGrid();
+  } else {
+    // Filtering and collection rendering can replace grid DOM during the same click.
+    // Reconcile after the current task and again on the next paint so autoplay uses
+    // the final rendered cards rather than transient view state.
+    queueMicrotask(syncLiveGrid);
+    requestAnimationFrame(syncLiveGrid);
   }
   renderCollections();
 }
