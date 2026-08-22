@@ -1,0 +1,35 @@
+name: Surface deep Live Grid debug
+
+on:
+  push:
+    branches:
+      - shift/pulse-truth-and-ux
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: shift/pulse-truth-and-ux
+          fetch-depth: 0
+      - name: Patch test diagnostics
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('tests/vanilla-parity.mjs')
+          s = p.read_text()
+          old = "  await page.waitForTimeout(350);\n  const autoVideos = page.locator('.camera-card.is-live .grid-video');"
+          new = "  await page.waitForTimeout(350);\n  console.log('LIVE_GRID_DEEP', JSON.stringify(await page.evaluate(() => ({entry:window.__LIVE_GRID_ENTRY__||null,selection:window.__LIVE_GRID_SELECTION__||null,gridHidden:document.querySelector('#grid')?.hidden,pressed:document.querySelector('[data-live-grid]')?.getAttribute('aria-pressed')}))));\n  const autoVideos = page.locator('.camera-card.is-live .grid-video');"
+          if old not in s: raise SystemExit('test insertion target not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          rm .github/workflows/shift-live-grid-test-debug.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tests/vanilla-parity.mjs .github/workflows/shift-live-grid-test-debug.yml
+          git commit -m 'test: surface deep Live Grid debug'
+          git push origin HEAD:shift/pulse-truth-and-ux
