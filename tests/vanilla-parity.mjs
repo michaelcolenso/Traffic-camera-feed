@@ -76,6 +76,7 @@ try {
     visibilityState: document.visibilityState,
     scrollY,
     pressed: document.querySelector('[data-live-grid]')?.getAttribute('aria-pressed'),
+    internal: window.__LIVE_GRID_DEBUG__ || null,
     totalVideos: document.querySelectorAll('.grid-video').length,
     playingVideos: document.querySelectorAll('.camera-card.is-live .grid-video').length,
     cards: [...document.querySelectorAll('.camera-card')].slice(0, 6).map((card) => {
