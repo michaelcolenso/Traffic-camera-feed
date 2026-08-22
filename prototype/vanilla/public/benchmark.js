@@ -10,6 +10,7 @@ let activeCollections = [];
 let focusedId = null;
 let lastSync = Date.now();
 const health = new Map();
+let healthRenderTimer = null;
 let map = null;
 let mapMarkers = [];
 let mapReadyPromise = null;
@@ -19,29 +20,11 @@ let liveGridEnabled = false;
 const gridPlayers = new Map();
 const visibleCards = new Set();
 const MAX_AUTO_LIVE = 4;
-
-const ANOMALY_STORAGE_KEY = 'seattle-traffic-watch:visual-baselines:v1';
-const ANOMALY_HISTORY_LIMIT = 8;
-const ANOMALY_MIN_SAMPLES = 3;
-const ANOMALY_THRESHOLD = 55;
-const ANOMALY_TTL = 3 * 60 * 1000;
-const ANOMALY_WIDTH = 12;
-const ANOMALY_HEIGHT = 8;
-const anomaly = new Map();
-let anomalyHistory = loadAnomalyHistory();
-let anomalyCanvas = null;
-let anomalyContext = null;
-const anomalyQueue = new Map();
-const analyzedSources = new Map();
-let anomalyQueueTimer = null;
-let anomalySaveTimer = null;
-let anomalyUiTimer = null;
-const historicalSeedAttempted = new Set();
 let focusHistory = null;
 let timelapseTimer = null;
 let pulse = null;
+let pulseByCamera = new Map();
 const PULSE_REFRESH_MS = 60000;
-const ANOMALY_START_DELAY = 12000;
 
 const $ = (selector) => document.querySelector(selector);
 const grid = $('#grid');
@@ -61,21 +44,16 @@ const sourceError = $('#source-error');
 const pulseEl = $('#pulse');
 
 const COLLECTIONS = [
-  ['unusual','Unusual Now','Cameras whose current scene differs materially from their learned recent baseline.'],
+  ['unusual','Visual changes','Current server-observed visual changes relative to recent historical baselines.'],
   ['live','Live streams','Cameras with a playable video stream.'],
-  ['downtown','Downtown','Likely downtown intersections based on camera labels.'],
+  ['downtown','Downtown','Cameras canonically classified in the downtown core.'],
   ['bridges','Bridges','Bridge approaches and named bridge cameras.'],
-  ['i5','I-5','Interstate 5 corridor cameras.'],
+  ['i5','I-5','Interstate 5 corridor cameras when present in the selected source.'],
   ['aurora','Aurora / 99','Aurora Avenue and SR-99 cameras.'],
   ['recent','Recently refreshed','Cameras refreshed successfully within the last minute.'],
   ['issues','Signal issues','Cameras with recent image or stream failures.'],
 ];
-const KEYWORDS = {
-  downtown:['downtown','5th','4th','3rd','2nd','1st','pike','pine','union','madison','james'],
-  bridges:['bridge','fremont','ballard','montlake','spokane','west seattle','university'],
-  i5:['i-5','i5','interstate 5'],
-  aurora:['aurora','sr 99','sr99','99'],
-};
+const TAXONOMY_COLLECTIONS = new Set(['downtown','bridges','i5','aurora']);
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -86,168 +64,24 @@ function imageUrl(camera, width = 480, fresh = false) {
 }
 function cameraById(id) { return cameras.find((camera) => camera.id === id); }
 function getHealth(camera) { return health.get(camera.id) || {}; }
+function pulseObservation(camera) { return pulseByCamera.get(camera.id) || null; }
+function isUnusual(camera) { return Boolean(pulseObservation(camera)); }
+function baselineLearnedCount() { return Number(pulse?.camerasAnalyzed || 0); }
+function scheduleHealthRender() {
+  if (healthRenderTimer) return;
+  healthRenderTimer = setTimeout(() => {
+    healthRenderTimer = null;
+    renderCollections();
+    updateCounts();
+    if (!diagnostics.hidden) renderDiagnostics();
+  }, 120);
+}
 function noteHealth(camera, kind) {
   const current = getHealth(camera);
   if (kind === 'refresh') health.set(camera.id, {...current,lastImageRefresh:Date.now(),lastImageError:undefined});
   if (kind === 'image-error') health.set(camera.id, {...current,lastImageError:Date.now()});
   if (kind === 'stream-error') health.set(camera.id, {...current,lastStreamError:Date.now()});
-  renderCollections();
-  if (!diagnostics.hidden) renderDiagnostics();
-}
-
-function loadAnomalyHistory() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(ANOMALY_STORAGE_KEY) || '{}');
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch { return {}; }
-}
-function saveAnomalyHistory() {
-  if (anomalySaveTimer) return;
-  anomalySaveTimer = setTimeout(() => {
-    anomalySaveTimer = null;
-    try { localStorage.setItem(ANOMALY_STORAGE_KEY, JSON.stringify(anomalyHistory)); } catch {}
-  }, 1200);
-}
-function median(values) {
-  if (!values.length) return 0;
-  const sorted = [...values].sort((a,b)=>a-b);
-  const middle = Math.floor(sorted.length/2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle-1]+sorted[middle])/2;
-}
-function anomalyState(camera) {
-  const state = anomaly.get(camera.id);
-  if (!state || Date.now() - state.at > ANOMALY_TTL) return null;
-  return state;
-}
-function isUnusual(camera) {
-  const state = anomalyState(camera);
-  return Boolean(state && state.samples >= ANOMALY_MIN_SAMPLES && state.score >= ANOMALY_THRESHOLD);
-}
-function baselineLearnedCount() {
-  return cameras.filter((camera)=>(anomalyHistory[camera.id]?.samples?.length || 0) >= ANOMALY_MIN_SAMPLES).length;
-}
-function fingerprintImage(img) {
-  if (!img.complete || !img.naturalWidth || !img.naturalHeight) return null;
-  anomalyCanvas ||= document.createElement('canvas');
-  anomalyCanvas.width = ANOMALY_WIDTH;
-  anomalyCanvas.height = ANOMALY_HEIGHT;
-  anomalyContext ||= anomalyCanvas.getContext('2d',{willReadFrequently:true});
-  if (!anomalyContext) return null;
-  anomalyContext.drawImage(img,0,0,ANOMALY_WIDTH,ANOMALY_HEIGHT);
-  let pixels;
-  try { pixels = anomalyContext.getImageData(0,0,ANOMALY_WIDTH,ANOMALY_HEIGHT).data; }
-  catch { return null; }
-  const luminance=[];
-  for(let i=0;i<pixels.length;i+=4){
-    luminance.push(Math.round((0.2126*pixels[i]+0.7152*pixels[i+1]+0.0722*pixels[i+2])));
-  }
-  const mean=luminance.reduce((sum,value)=>sum+value,0)/luminance.length;
-  const contrast=Math.sqrt(luminance.reduce((sum,value)=>sum+((value-mean)**2),0)/luminance.length);
-  return {pixels:luminance,mean,contrast};
-}
-function baselineFor(samples) {
-  if (!samples.length) return null;
-  const length=samples[0].pixels.length;
-  const pixels=Array.from({length},(_,index)=>median(samples.map((sample)=>sample.pixels[index])));
-  return {pixels,mean:median(samples.map((sample)=>sample.mean)),contrast:median(samples.map((sample)=>sample.contrast))};
-}
-function scoreFingerprint(current, baseline) {
-  const pixelDiff=current.pixels.reduce((sum,value,index)=>sum+Math.abs(value-baseline.pixels[index]),0)/(current.pixels.length*255);
-  const meanShift=Math.abs(current.mean-baseline.mean)/255;
-  const contrastShift=Math.abs(current.contrast-baseline.contrast)/128;
-  const raw=(pixelDiff*0.78)+(meanShift*0.14)+(contrastShift*0.08);
-  const score=Math.round(Math.max(0,Math.min(1,(raw-0.025)/0.16))*100);
-  let reason='Scene changed more than usual';
-  if (meanShift>0.16) reason=current.mean<baseline.mean?'Scene became much darker':'Scene became much brighter';
-  else if (contrastShift>0.22 && current.contrast<baseline.contrast) reason='Visibility or contrast dropped';
-  else if (pixelDiff>0.16) reason='Large scene change detected';
-  else if (pixelDiff>0.10) reason='Traffic or scene pattern shifted';
-  return {score,reason,pixelDiff,meanShift,contrastShift};
-}
-function updateAnomalyCard(camera) {
-  const cardEl=grid.querySelector(`.camera-card[data-camera-id="${CSS.escape(camera.id)}"]`);
-  const meta=cardEl?.querySelector('.card-copy span');
-  if (!meta) return;
-  const state=anomalyState(camera);
-  meta.textContent=isUnusual(camera)?`Changed ${state.score}`:(camera.videoUrl?'Live':'Snapshot');
-  if (isUnusual(camera)) meta.title=state.reason;
-  else meta.removeAttribute('title');
-}
-function scheduleAnomalyUi() {
-  if (anomalyUiTimer) return;
-  anomalyUiTimer = setTimeout(() => {
-    anomalyUiTimer = null;
-    renderCollections();
-    updateCounts();
-    if (!diagnostics.hidden) renderDiagnostics();
-    if (activeCollections.includes('unusual')) refilter();
-  }, 350);
-}
-function processAnomalyQueue() {
-  anomalyQueueTimer = null;
-  if (document.hidden || !anomalyQueue.size) return;
-  const [id, item] = anomalyQueue.entries().next().value;
-  anomalyQueue.delete(id);
-  analyzeImage(item.camera,item.img);
-  if (anomalyQueue.size) anomalyQueueTimer = setTimeout(processAnomalyQueue,80);
-}
-function queueAnomalyAnalysis(camera,img) {
-  const src = img.currentSrc || img.src;
-  if (!src || analyzedSources.get(camera.id) === src) return;
-  analyzedSources.set(camera.id,src);
-  anomalyQueue.set(camera.id,{camera,img});
-  if (anomalyQueueTimer) return;
-  const delay = Math.max(80, ANOMALY_START_DELAY - performance.now());
-  anomalyQueueTimer = setTimeout(processAnomalyQueue,delay);
-}
-async function seedHistoricalBaseline(camera) {
-  const record=anomalyHistory[camera.id] || {samples:[]};
-  const existing=Array.isArray(record.samples)?record.samples:[];
-  if (existing.length>=ANOMALY_MIN_SAMPLES || historicalSeedAttempted.has(camera.id)) return;
-  historicalSeedAttempted.add(camera.id);
-  try {
-    const response=await fetch(`/api/history?camera=${encodeURIComponent(camera.id)}&hours=6&limit=4`,{headers:{Accept:'application/json'}});
-    if(!response.ok)return;
-    const data=await response.json();
-    const frames=Array.isArray(data.frames)?data.frames.slice(0,ANOMALY_MIN_SAMPLES):[];
-    const seeded=[];
-    for(const frame of frames){
-      const img=new Image();
-      img.decoding='async';
-      const loaded=new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;});
-      img.src=frame.imageUrl;
-      try{await loaded;const fp=fingerprintImage(img);if(fp)seeded.push(fp);}catch{}
-    }
-    if(seeded.length){
-      record.samples=[...seeded,...existing].slice(-ANOMALY_HISTORY_LIMIT);
-      record.updatedAt=Date.now();
-      anomalyHistory[camera.id]=record;
-      saveAnomalyHistory();
-    }
-  }catch{}
-}
-function analyzeImage(camera,img) {
-  const record=anomalyHistory[camera.id] || {samples:[]};
-  if ((record.samples?.length||0)<ANOMALY_MIN_SAMPLES && !historicalSeedAttempted.has(camera.id)) {
-    seedHistoricalBaseline(camera).finally(()=>analyzeImage(camera,img));
-    return;
-  }
-  const current=fingerprintImage(img);
-  if (!current) return;
-  const previous=Array.isArray(record.samples)?record.samples.slice(-ANOMALY_HISTORY_LIMIT):[];
-  const baseline=baselineFor(previous);
-  if (baseline && previous.length>=ANOMALY_MIN_SAMPLES) {
-    const scored=scoreFingerprint(current,baseline);
-    anomaly.set(camera.id,{...scored,samples:previous.length,at:Date.now()});
-  } else {
-    anomaly.set(camera.id,{score:0,reason:'Learning recent baseline',samples:previous.length,at:Date.now()});
-  }
-  record.samples=[...previous,current].slice(-ANOMALY_HISTORY_LIMIT);
-  record.updatedAt=Date.now();
-  anomalyHistory[camera.id]=record;
-  saveAnomalyHistory();
-  updateAnomalyCard(camera);
-  scheduleAnomalyUi();
+  scheduleHealthRender();
 }
 
 function matchesCollection(camera, id) {
@@ -256,12 +90,12 @@ function matchesCollection(camera, id) {
   if (id === 'live') return Boolean(camera.videoUrl);
   if (id === 'recent') return Boolean(h.lastImageRefresh && Date.now() - h.lastImageRefresh < 60000);
   if (id === 'issues') return Boolean(h.lastImageError || h.lastStreamError);
-  return (KEYWORDS[id] || []).some((word) => camera.label.toLowerCase().includes(word));
+  return Array.isArray(camera.collections) && camera.collections.includes(id);
 }
 function matchesQuery(camera, query) {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return true;
-  const searchable = [camera.label,camera.imagePath,camera.videoUrl,camera.webUrl,camera.lat,camera.lng].filter(Boolean).join(' ').toLowerCase();
+  const searchable = [camera.label,camera.imagePath,camera.videoUrl,camera.webUrl,camera.lat,camera.lng,...(camera.collections || [])].filter(Boolean).join(' ').toLowerCase();
   return normalized.split(/\s+/).every((token) => searchable.includes(token));
 }
 function refilter() {
@@ -272,7 +106,7 @@ function refilter() {
     const values = activeCollections.map((id) => matchesCollection(camera,id));
     return collectionMode === 'all' ? values.every(Boolean) : values.some(Boolean);
   });
-  if (activeCollections.includes('unusual')) filtered.sort((a,b)=>(anomalyState(b)?.score||0)-(anomalyState(a)?.score||0));
+  if (activeCollections.includes('unusual')) filtered.sort((a,b)=>(pulseObservation(b)?.score||0)-(pulseObservation(a)?.score||0));
   visible = matchMedia('(min-width:768px)').matches ? 16 : 6;
   stopAllGridVideo();
   renderGrid(true);
@@ -282,13 +116,29 @@ function refilter() {
   if (view === 'map') renderMapMarkers();
   if (liveGridEnabled && view === 'grid') queueMicrotask(syncLiveGrid);
 }
+function observationMeta(camera) {
+  const observation = pulseObservation(camera);
+  if (!observation) return {text: camera.videoUrl ? 'Live' : 'Snapshot', title: ''};
+  const headline = observation.display?.headline || observation.reason || 'Visual change';
+  return {text:`Changed ${observation.score}`,title:headline};
+}
 function card(camera, index) {
   const liveControl = camera.videoUrl
     ? `<button class="grid-play" type="button" data-grid-play="${escapeHtml(camera.id)}" aria-label="Play live video for ${escapeHtml(camera.label)}"><span class="play-icon">▶</span><span class="play-label">Play live</span></button>`
     : '';
-  const state=anomalyState(camera);
-  const meta=isUnusual(camera)?`Changed ${state.score}`:(camera.videoUrl?'Live':'Snapshot');
-  return `<article class="camera-card" data-camera-id="${escapeHtml(camera.id)}"><div class="image-shell"><img src="${imageUrl(camera)}" alt="${escapeHtml(camera.label)}" width="480" height="270" ${index ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async">${liveControl}<span class="live-badge" hidden>LIVE</span></div><button class="camera-open" data-camera="${escapeHtml(camera.id)}" aria-label="View ${escapeHtml(camera.label)}"><div class="card-copy"><h2>${escapeHtml(camera.label)}</h2><span${state?.reason?` title="${escapeHtml(state.reason)}"`:''}>${meta}</span></div></button></article>`;
+  const meta = observationMeta(camera);
+  return `<article class="camera-card" data-camera-id="${escapeHtml(camera.id)}"><div class="image-shell" data-camera-open="${escapeHtml(camera.id)}" role="button" tabindex="0" aria-label="View ${escapeHtml(camera.label)}"><img src="${imageUrl(camera)}" alt="${escapeHtml(camera.label)}" width="480" height="270" ${index ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async">${liveControl}<span class="live-badge" hidden>LIVE</span></div><button class="camera-open" data-camera="${escapeHtml(camera.id)}" aria-label="View ${escapeHtml(camera.label)}"><div class="card-copy"><h2>${escapeHtml(camera.label)}</h2><span${meta.title?` title="${escapeHtml(meta.title)}"`:''}>${escapeHtml(meta.text)}</span></div></button></article>`;
+}
+function updateObservationBadges() {
+  grid.querySelectorAll('.camera-card').forEach((cardEl) => {
+    const camera = cameraById(cardEl.dataset.cameraId);
+    const metaEl = cardEl.querySelector('.card-copy span');
+    if (!camera || !metaEl) return;
+    const meta = observationMeta(camera);
+    metaEl.textContent = meta.text;
+    if (meta.title) metaEl.title = meta.title;
+    else metaEl.removeAttribute('title');
+  });
 }
 function bindImageHealth(root = grid) {
   root.querySelectorAll('.camera-card img').forEach((img) => {
@@ -296,15 +146,14 @@ function bindImageHealth(root = grid) {
     img.dataset.healthBound = '1';
     const camera = cameraById(img.closest('.camera-card')?.dataset.cameraId);
     if (!camera) return;
-    img.addEventListener('load', () => { noteHealth(camera,'refresh'); queueAnomalyAnalysis(camera,img); });
+    img.addEventListener('load', () => noteHealth(camera,'refresh'));
     img.addEventListener('error', () => noteHealth(camera,'image-error'));
-    if (img.complete && img.naturalWidth) queueAnomalyAnalysis(camera,img);
   });
 }
 const cardObserver = new IntersectionObserver((entries) => {
   for (const entry of entries) {
-    const card = entry.target;
-    const id = card.dataset.cameraId;
+    const cardEl = entry.target;
+    const id = cardEl.dataset.cameraId;
     if (!id) continue;
     if (entry.isIntersecting && entry.intersectionRatio >= 0.25) visibleCards.add(id);
     else {
@@ -315,15 +164,15 @@ const cardObserver = new IntersectionObserver((entries) => {
   if (liveGridEnabled && view === 'grid') syncLiveGrid();
 }, {threshold:[0,0.25,0.6],rootMargin:'80px 0px'});
 function observeCards(root = grid) {
-  root.querySelectorAll('.camera-card').forEach((card) => {
-    if (card.dataset.liveObserved) return;
-    card.dataset.liveObserved = '1';
-    cardObserver.observe(card);
+  root.querySelectorAll('.camera-card').forEach((cardEl) => {
+    if (cardEl.dataset.liveObserved) return;
+    cardEl.dataset.liveObserved = '1';
+    cardObserver.observe(cardEl);
   });
 }
 function renderGrid(reset = false) {
   if (reset) {
-    grid.querySelectorAll('.camera-card').forEach((card)=>cardObserver.unobserve(card));
+    grid.querySelectorAll('.camera-card').forEach((cardEl)=>cardObserver.unobserve(cardEl));
     visibleCards.clear();
     grid.textContent = '';
   }
@@ -339,24 +188,26 @@ function renderGrid(reset = false) {
   observeCards();
 }
 function renderCollections() {
-  collectionsEl.innerHTML = COLLECTIONS.map(([id,label,description]) => {
+  const chips = COLLECTIONS.map(([id,label,description]) => {
     const count = cameras.filter((camera) => matchesCollection(camera,id)).length;
     const active = activeCollections.includes(id);
+    if (!count && TAXONOMY_COLLECTIONS.has(id) && !active) return '';
     return `<button class="chip ${active?'active':''}" data-collection="${id}" title="${escapeHtml(description)}" aria-pressed="${active}">${escapeHtml(label)} <span>${count}</span></button>`;
-  }).join('') + (activeCollections.length ? '<button class="chip" data-clear-collections>Clear all</button>' : '') + `<button class="chip live-grid-toggle ${liveGridEnabled?'active':''}" data-live-grid aria-pressed="${liveGridEnabled}" title="Autoplay up to ${MAX_AUTO_LIVE} visible live cameras, muted">${liveGridEnabled?'● Live Grid on':'▶ Live Grid'}</button>`;
+  }).join('');
+  collectionsEl.innerHTML = chips + (activeCollections.length ? '<button class="chip" data-clear-collections>Clear all</button>' : '') + `<button class="chip live-grid-toggle ${liveGridEnabled?'active':''}" data-live-grid aria-pressed="${liveGridEnabled}" title="Autoplay up to ${MAX_AUTO_LIVE} visible live cameras, muted">${liveGridEnabled?'● Live Grid on':'▶ Live Grid'}</button>`;
 }
 function issueCount() { return [...health.values()].filter((h) => h.lastImageError || h.lastStreamError).length; }
-function unusualCount() { return cameras.filter(isUnusual).length; }
+function unusualCount() { return pulseByCamera.size; }
 function updateCounts() {
   visibleCount.textContent = `${filtered.length} visible / ${cameras.length} total`;
-  const unusual=unusualCount();
-  statusLine.textContent = `${cameras.length} cameras · ${source === 'arcgis' ? 'ArcGIS' : 'SDOT Socrata'} source · ${cameras.filter(c=>c.videoUrl).length} live${unusual?` · ${unusual} unusual`:''}`;
+  const unusual = unusualCount();
+  statusLine.textContent = `${cameras.length} cameras · ${source === 'arcgis' ? 'ArcGIS' : 'SDOT Socrata'} source · ${cameras.filter(c=>c.videoUrl).length} live${unusual?` · ${unusual} visual changes`:''}`;
   $('#diagnostics-toggle').textContent = `Diagnostics · ${issueCount()} issues`;
 }
 function renderDiagnostics() {
-  diagnostics.innerHTML = `<div><span>Total cameras</span><strong>${cameras.length}</strong></div><div><span>Live streams</span><strong>${cameras.filter(c=>c.videoUrl).length}</strong></div><div><span>Unusual now</span><strong>${unusualCount()}</strong></div><div><span>Baselines learned</span><strong>${baselineLearnedCount()}</strong></div><div><span>Signal issues</span><strong>${issueCount()}</strong></div><div><span>Last sync</span><strong>${new Date(lastSync).toLocaleTimeString()}</strong></div><button id="refresh-feed" class="chip accent">Refresh feed</button><button id="reset-baselines" class="chip">Reset visual baselines</button>`;
+  diagnostics.innerHTML = `<div><span>Total cameras</span><strong>${cameras.length}</strong></div><div><span>Live streams</span><strong>${cameras.filter(c=>c.videoUrl).length}</strong></div><div><span>Visual changes</span><strong>${unusualCount()}</strong></div><div><span>Pulse analyzed</span><strong>${baselineLearnedCount()}</strong></div><div><span>Signal issues</span><strong>${issueCount()}</strong></div><div><span>Last feed sync</span><strong>${new Date(lastSync).toLocaleTimeString()}</strong></div><button id="refresh-feed" class="chip accent">Refresh feed</button><button id="refresh-pulse" class="chip">Refresh Pulse</button>`;
   $('#refresh-feed')?.addEventListener('click', () => loadCameras(true));
-  $('#reset-baselines')?.addEventListener('click',()=>{anomalyHistory={};anomaly.clear();saveAnomalyHistory();refilter();renderDiagnostics();});
+  $('#refresh-pulse')?.addEventListener('click', () => loadPulse(true));
 }
 function updateUrl() {
   const params = new URLSearchParams();
@@ -414,14 +265,14 @@ function setView(next) {
 function loadScript(src) {
   return new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=reject;document.head.append(s);});
 }
+function loadStyle(href) {
+  if ([...document.styleSheets].some((s)=>s.href===new URL(href,location.href).href)) return;
+  const link=document.createElement('link');link.rel='stylesheet';link.href=href;document.head.append(link);
+}
 function ensureHlsScript() {
   if (window.Hls) return Promise.resolve();
   if (!hlsScriptPromise) hlsScriptPromise = loadScript('https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js').catch((error)=>{hlsScriptPromise=null;throw error;});
   return hlsScriptPromise;
-}
-function loadStyle(href) {
-  if ([...document.styleSheets].some((s)=>s.href===href)) return;
-  const link=document.createElement('link');link.rel='stylesheet';link.href=href;document.head.append(link);
 }
 async function ensureMap() {
   if (map) { renderMapMarkers(); return; }
@@ -440,44 +291,45 @@ async function ensureMap() {
 }
 function renderMapMarkers() {
   if (!map) return;
-  mapMarkers.forEach((m)=>m.remove()); mapMarkers=[];
-  const mappable = filtered.filter((c)=>Number.isFinite(c.lat)&&Number.isFinite(c.lng));
+  mapMarkers.forEach((marker)=>marker.remove()); mapMarkers=[];
+  const mappable = filtered.filter((camera)=>Number.isFinite(camera.lat)&&Number.isFinite(camera.lng));
   $('#map-count').textContent = `${mappable.length} active cameras`;
   for (const camera of mappable) {
-    const el=document.createElement('button');el.className=`camera-marker ${camera.videoUrl?'live':''} ${getHealth(camera).lastImageError?'issue':''}`;el.title=camera.label;el.setAttribute('aria-label',`View ${camera.label}`);
+    const el=document.createElement('button');
+    el.className=`camera-marker ${camera.videoUrl?'live':''} ${getHealth(camera).lastImageError?'issue':''} ${isUnusual(camera)?'changed':''}`;
+    el.title=camera.label;
+    el.setAttribute('aria-label',`View ${camera.label}`);
     el.addEventListener('click',(event)=>{event.stopPropagation();openFocus(camera.id);map.flyTo({center:[camera.lng,camera.lat],zoom:Math.max(map.getZoom(),13)});});
     mapMarkers.push(new maplibregl.Marker({element:el}).setLngLat([camera.lng,camera.lat]).addTo(map));
   }
 }
 function fitMap() {
   if (!map) return;
-  const points=filtered.filter((c)=>Number.isFinite(c.lat)&&Number.isFinite(c.lng)); if (!points.length) return;
-  const bounds=new maplibregl.LngLatBounds();points.forEach((c)=>bounds.extend([c.lng,c.lat]));map.fitBounds(bounds,{padding:72,maxZoom:14});
+  const points=filtered.filter((camera)=>Number.isFinite(camera.lat)&&Number.isFinite(camera.lng)); if (!points.length) return;
+  const bounds=new maplibregl.LngLatBounds();points.forEach((camera)=>bounds.extend([camera.lng,camera.lat]));map.fitBounds(bounds,{padding:72,maxZoom:14});
 }
 
 function nearest(camera, limit = 4) {
   if (!Number.isFinite(camera.lat)||!Number.isFinite(camera.lng)) return [];
-  return cameras.filter((c)=>c.id!==camera.id&&Number.isFinite(c.lat)&&Number.isFinite(c.lng)).map((c)=>({c,d:Math.hypot(c.lat-camera.lat,c.lng-camera.lng)})).sort((a,b)=>a.d-b.d).slice(0,limit).map((x)=>x.c);
+  return cameras.filter((candidate)=>candidate.id!==camera.id&&Number.isFinite(candidate.lat)&&Number.isFinite(candidate.lng)).map((candidate)=>({candidate,d:Math.hypot(candidate.lat-camera.lat,candidate.lng-camera.lng)})).sort((a,b)=>a.d-b.d).slice(0,limit).map((item)=>item.candidate);
 }
-function preferredVideoUrl(camera) {
-  return camera.directVideoUrl || camera.videoUrl;
-}
+function preferredVideoUrl(camera) { return camera.directVideoUrl || camera.videoUrl; }
 function withTimeout(promise, ms, message = 'Video connection timed out') {
   let timer;
   const timeout = new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(message)),ms);});
   return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer));
 }
 async function attachHls(video, camera, onFatal) {
-  const source = preferredVideoUrl(camera);
-  if (!source) throw new Error('No video source');
+  const streamSource = preferredVideoUrl(camera);
+  if (!streamSource) throw new Error('No video source');
   if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = source;
+    video.src = streamSource;
     return null;
   }
   await ensureHlsScript();
   if (!window.Hls?.isSupported()) throw new Error('HLS playback is not supported');
   const instance = new Hls({enableWorker:true,lowLatencyMode:false});
-  instance.loadSource(source);
+  instance.loadSource(streamSource);
   instance.attachMedia(video);
   instance.on(Hls.Events.ERROR,(_event,data)=>{if(data.fatal)onFatal?.(data);});
   return instance;
@@ -485,18 +337,17 @@ async function attachHls(video, camera, onFatal) {
 async function setupVideo(camera) {
   if (!camera.videoUrl) return;
   const video = $('#focus-video'); if (!video) return;
-  try {
-    hls = await attachHls(video,camera,()=>noteHealth(camera,'stream-error'));
-  } catch { noteHealth(camera,'stream-error'); }
+  try { hls = await attachHls(video,camera,()=>noteHealth(camera,'stream-error')); }
+  catch { noteHealth(camera,'stream-error'); }
 }
 function destroyVideo() { if (hls){hls.destroy();hls=null;} }
 
 function updateGridPlayerUi(id, playing) {
-  const card = grid.querySelector(`.camera-card[data-camera-id="${CSS.escape(id)}"]`);
-  if (!card) return;
-  card.classList.toggle('is-live',playing);
-  const button = card.querySelector('[data-grid-play]');
-  const badge = card.querySelector('.live-badge');
+  const cardEl = grid.querySelector(`.camera-card[data-camera-id="${CSS.escape(id)}"]`);
+  if (!cardEl) return;
+  cardEl.classList.toggle('is-live',playing);
+  const button = cardEl.querySelector('[data-grid-play]');
+  const badge = cardEl.querySelector('.live-badge');
   if (button) {
     button.classList.remove('is-connecting');
     button.classList.toggle('is-playing',playing);
@@ -514,21 +365,19 @@ function stopGridVideo(id) {
   player.video.removeAttribute('src');
   player.video.load();
   player.video.remove();
-  const card = grid.querySelector(`.camera-card[data-camera-id="${CSS.escape(id)}"]`);
-  const img = card?.querySelector('.image-shell img');
+  const cardEl = grid.querySelector(`.camera-card[data-camera-id="${CSS.escape(id)}"]`);
+  const img = cardEl?.querySelector('.image-shell img');
   if (img) img.hidden = false;
   gridPlayers.delete(id);
   updateGridPlayerUi(id,false);
 }
-function stopAllGridVideo() {
-  [...gridPlayers.keys()].forEach(stopGridVideo);
-}
+function stopAllGridVideo() { [...gridPlayers.keys()].forEach(stopGridVideo); }
 async function startGridVideo(id, mode = 'manual') {
   if (gridPlayers.has(id)) return;
   const camera = cameraById(id);
-  const card = grid.querySelector(`.camera-card[data-camera-id="${CSS.escape(id)}"]`);
-  if (!camera?.videoUrl || !card) return;
-  const shell = card.querySelector('.image-shell');
+  const cardEl = grid.querySelector(`.camera-card[data-camera-id="${CSS.escape(id)}"]`);
+  if (!camera?.videoUrl || !cardEl) return;
+  const shell = cardEl.querySelector('.image-shell');
   const img = shell?.querySelector('img');
   if (!shell || !img) return;
   const video = document.createElement('video');
@@ -543,7 +392,7 @@ async function startGridVideo(id, mode = 'manual') {
   shell.insertBefore(video,img);
   const player = {video,hls:null,mode};
   gridPlayers.set(id,player);
-  const button = card.querySelector('[data-grid-play]');
+  const button = cardEl.querySelector('[data-grid-play]');
   if (button) {
     button.classList.add('is-connecting');
     button.querySelector('.play-icon').textContent = '…';
@@ -564,23 +413,15 @@ async function startGridVideo(id, mode = 'manual') {
 }
 function syncLiveGrid() {
   if (!liveGridEnabled || view !== 'grid' || document.hidden) return;
-  const autoCandidates = [...visibleCards]
-    .map(cameraById)
-    .filter((camera)=>camera?.videoUrl)
-    .slice(0,MAX_AUTO_LIVE);
+  const autoCandidates = [...visibleCards].map(cameraById).filter((camera)=>camera?.videoUrl).slice(0,MAX_AUTO_LIVE);
   const target = new Set(autoCandidates.map((camera)=>camera.id));
-  for (const [id,player] of gridPlayers) {
-    if (player.mode === 'auto' && !target.has(id)) stopGridVideo(id);
-  }
-  for (const camera of autoCandidates) {
-    if (!gridPlayers.has(camera.id)) startGridVideo(camera.id,'auto');
-  }
+  for (const [id,player] of gridPlayers) if (player.mode === 'auto' && !target.has(id)) stopGridVideo(id);
+  for (const camera of autoCandidates) if (!gridPlayers.has(camera.id)) startGridVideo(camera.id,'auto');
 }
 function setLiveGrid(enabled) {
   liveGridEnabled = enabled;
-  if (!enabled) {
-    for (const [id,player] of [...gridPlayers]) if (player.mode === 'auto') stopGridVideo(id);
-  } else if (view === 'grid') syncLiveGrid();
+  if (!enabled) for (const [id,player] of [...gridPlayers]) if (player.mode === 'auto') stopGridVideo(id);
+  else if (view === 'grid') syncLiveGrid();
   renderCollections();
 }
 
@@ -620,11 +461,12 @@ function showComparison(camera){
   const media=$('.focus-media');if(!media)return;
   const overlay=historyOverlay();if(overlay)overlay.hidden=true;
   hideComparison();
-  media.insertAdjacentHTML('beforeend',`<div id="compare-stage" class="compare-stage"><img src="${imageUrl(camera,960,true)}" alt="${escapeHtml(camera.label)} now"><div class="compare-before"><img src="${frame.imageUrl}" alt="${escapeHtml(camera.label)} at ${timeLabel(frame.capturedAt)}"></div><span class="compare-label before">${timeLabel(frame.capturedAt)}</span><span class="compare-label now">Now</span><span class="compare-divider"></span></div>`);
+  media.insertAdjacentHTML('beforeend',`<div id="compare-stage" class="compare-stage" style="--split:50%"><img class="compare-now-image" src="${imageUrl(camera,960,true)}" alt="${escapeHtml(camera.label)} now"><img class="compare-before-image" src="${frame.imageUrl}" alt="${escapeHtml(camera.label)} at ${timeLabel(frame.capturedAt)}"><span class="compare-label before">${timeLabel(frame.capturedAt)}</span><span class="compare-label now">Now</span><span class="compare-divider"></span></div>`);
   const tm=$('#time-machine');
   tm?.insertAdjacentHTML('beforeend','<label class="compare-control">Before / After <input id="compare-scrubber" type="range" min="5" max="95" value="50"></label>');
   const slider=$('#compare-scrubber');
-  const apply=()=>{const value=Number(slider.value);const before=$('.compare-before');const divider=$('.compare-divider');if(before)before.style.width=`${value}%`;if(divider)divider.style.left=`${value}%`;};
+  const stage=$('#compare-stage');
+  const apply=()=>stage?.style.setProperty('--split',`${Number(slider.value)}%`);
   slider?.addEventListener('input',apply);apply();
 }
 function startTimelapse(camera){
@@ -657,11 +499,13 @@ async function loadTimeMachine(camera){
   }
 }
 
-
 function pulseCamera(item) { return cameraById(item.cameraId); }
 function pulseTime(value) {
   const minutes=Math.max(0,Math.round((Date.now()-value)/60000));
   return minutes<1?'just now':minutes===1?'1 min ago':`${minutes} min ago`;
+}
+function confidenceLabel(value) {
+  return value === 'high' ? 'high confidence' : value === 'moderate' ? 'moderate confidence' : '';
 }
 function renderPulse() {
   if (!pulseEl) return;
@@ -670,24 +514,39 @@ function renderPulse() {
     return;
   }
   const items=(pulse.items||[]).filter((item)=>pulseCamera(item)).slice(0,6);
+  const events=(pulse.events||[]).slice(0,4).map((event)=>`<div class="phase2-event" data-severity="${escapeHtml(event.severity)}"><strong>${escapeHtml(event.title)}</strong><span>${escapeHtml(event.detail)} · ${escapeHtml(event.confidence)} confidence</span></div>`).join('');
   const cards=items.map((item,index)=>{
     const camera=pulseCamera(item);
-    return `<button class="pulse-card" data-pulse-camera="${escapeHtml(item.cameraId)}"><span class="pulse-rank">#${index+1}</span><span class="pulse-thumb"><img src="${imageUrl(camera,480,true)}" alt="" width="160" height="90" loading="lazy"></span><span class="pulse-copy"><strong>${escapeHtml(camera.label)}</strong><small>${escapeHtml(item.reason)} · ${item.transitions} changes · ${pulseTime(item.capturedAt)}</small></span><span class="pulse-score" title="Evidence-based Pulse score">${item.score}</span></button>`;
+    const headline=item.display?.headline||item.reason||'Visual change';
+    const detail=item.display?.detail||item.reason||'';
+    const persistence=item.persistenceSamples>=2?` · ${item.persistenceSamples} captures`:'';
+    const confidence=confidenceLabel(item.confidence);
+    return `<button class="pulse-card" data-pulse-camera="${escapeHtml(item.cameraId)}" data-observation-state="${escapeHtml(item.state||'changing')}" data-observation-severity="${escapeHtml(item.severity||'low')}"><span class="pulse-rank">#${index+1}</span><span class="pulse-thumb"><img src="${imageUrl(camera,480,true)}" alt="" width="160" height="90" loading="lazy"></span><span class="pulse-copy"><strong>${escapeHtml(camera.label)}</strong><small title="${escapeHtml(detail)}">${escapeHtml(headline)} · ${pulseTime(item.capturedAt)}${escapeHtml(persistence)}${confidence?` <span class="phase2-confidence">${escapeHtml(confidence)}</span>`:''} · <span class="phase2-evidence">Open evidence →</span></small></span><span class="pulse-score" title="${escapeHtml(detail)}">${item.score}</span></button>`;
   }).join('');
-  pulseEl.innerHTML=`<div class="pulse-head"><div><p class="eyebrow">Seattle Pulse</p><div class="pulse-title"><strong>${escapeHtml(pulse.state)}</strong><span>${pulse.pulseScore}/100</span></div></div><div class="pulse-meta"><span>${pulse.activeCameras} active cameras</span><span>${pulse.camerasAnalyzed} analyzed</span><button id="pulse-refresh" class="chip">Refresh</button></div></div><div class="pulse-rail">${cards||'<div class="pulse-empty">History is still warming up.</div>'}</div><p class="pulse-method">Observed visual change only — Pulse does not infer crashes, congestion, or causes.</p>`;
+  pulseEl.innerHTML=`<div class="pulse-head"><div><p class="eyebrow">Seattle Pulse</p><div class="pulse-title"><strong>${escapeHtml(pulse.state)}</strong><span>${pulse.pulseScore}/100</span></div></div><div class="pulse-meta"><span>${pulse.activeCameras} active cameras</span><span>${pulse.camerasAnalyzed} analyzed</span><button id="pulse-refresh" class="chip">Refresh</button></div></div>${events?`<div class="phase2-events" aria-label="Correlated areas">${events}</div>`:''}<div class="pulse-rail">${cards||'<div class="pulse-empty">History is still warming up.</div>'}</div><p class="pulse-method">Observed visual change only — Pulse does not infer crashes, congestion, weather, incidents, or causes.</p>`;
   pulseEl.querySelectorAll('[data-pulse-camera]').forEach((button)=>button.addEventListener('click',()=>openFocus(button.dataset.pulseCamera)));
   $('#pulse-refresh')?.addEventListener('click',()=>loadPulse(true));
 }
 async function loadPulse(force=false) {
   if (!pulseEl || document.hidden) return;
   const url=new URL('/api/pulse',location.origin);
-  url.searchParams.set('window','60');url.searchParams.set('limit','12');if(force)url.searchParams.set('_',Date.now());
+  url.searchParams.set('window','60');url.searchParams.set('limit','24');if(force)url.searchParams.set('_',Date.now());
   try {
     const response=await fetch(url,{headers:{Accept:'application/json'}});
     if(!response.ok)throw new Error(`Pulse returned ${response.status}`);
     const next=await response.json();
     if(!Array.isArray(next.items))throw new Error('Unexpected Pulse payload');
-    pulse=next;renderPulse();
+    pulse=next;
+    pulseByCamera=new Map(next.items.map((item)=>[item.cameraId,item]));
+    renderPulse();
+    if (activeCollections.includes('unusual')) refilter();
+    else {
+      renderCollections();
+      updateCounts();
+      updateObservationBadges();
+      if (view === 'map') renderMapMarkers();
+    }
+    if (!diagnostics.hidden) renderDiagnostics();
   } catch {
     if(!pulse)pulseEl.innerHTML='<div class="pulse-loading pulse-error"><div><p class="eyebrow">Seattle Pulse</p><strong>Pulse temporarily unavailable</strong></div><button id="pulse-retry" class="chip">Retry</button></div>';
     $('#pulse-retry')?.addEventListener('click',()=>loadPulse(true));
@@ -697,43 +556,51 @@ async function loadPulse(force=false) {
 function openFocus(id) {
   const camera=cameraById(id); if (!camera) return;
   destroyVideo(); focusedId=id; updateUrl();
-  const set=filtered.length?filtered:cameras;const index=set.findIndex((c)=>c.id===id);const prev=set[(index-1+set.length)%set.length];const next=set[(index+1)%set.length];
-  const nearby=nearest(camera).map((c)=>`<button class="nearby-camera" data-focus="${escapeHtml(c.id)}">${escapeHtml(c.label)}</button>`).join('');
-  const state=anomalyState(camera);
-  const anomalyCopy=state&&state.samples>=ANOMALY_MIN_SAMPLES?`<p class="sub">Visual change score ${state.score}/100 · ${escapeHtml(state.reason)}</p>`:'';
-  modalBody.innerHTML=`<div class="focus-head"><p class="eyebrow">Camera focus</p><h2>${escapeHtml(camera.label)}</h2>${anomalyCopy}</div><div class="focus-media">${camera.videoUrl?`<video id="focus-video" controls playsinline poster="${imageUrl(camera,960,true)}"></video>`:`<img src="${imageUrl(camera,960,true)}" alt="${escapeHtml(camera.label)}" width="960" height="540">`}<img id="history-frame" class="history-frame" hidden alt="Historical frame for ${escapeHtml(camera.label)}"></div><section id="time-machine" class="time-machine" aria-live="polite"><div class="time-machine-empty"><strong>Traffic Time Machine</strong><span>Loading recent history…</span></div></section><div class="focus-actions"><button class="chip" data-focus="${escapeHtml(prev?.id||id)}">← Previous</button><button id="refresh-focus" class="chip">Refresh snapshot</button><button class="chip" data-focus="${escapeHtml(next?.id||id)}">Next →</button>${camera.webUrl?`<a class="chip" href="${escapeHtml(camera.webUrl)}" target="_blank" rel="noopener noreferrer">SDOT page</a>`:''}</div>${nearby?`<div class="nearby"><p>Nearby cameras</p>${nearby}</div>`:''}`;
+  const set=filtered.length?filtered:cameras;const index=set.findIndex((candidate)=>candidate.id===id);const prev=set[(index-1+set.length)%set.length];const next=set[(index+1)%set.length];
+  const nearby=nearest(camera).map((candidate)=>`<button class="nearby-camera" data-focus="${escapeHtml(candidate.id)}">${escapeHtml(candidate.label)}</button>`).join('');
+  const observation=pulseObservation(camera);
+  const observationCopy=observation?`<p class="sub">Visual change ${observation.score}/100 · ${escapeHtml(observation.display?.headline||observation.reason||'Observed change')} · ${escapeHtml(confidenceLabel(observation.confidence)||'qualified observation')}</p>`:'';
+  modalBody.innerHTML=`<div class="focus-head"><p class="eyebrow">Camera focus</p><h2>${escapeHtml(camera.label)}</h2>${observationCopy}</div><div class="focus-media">${camera.videoUrl?`<video id="focus-video" controls playsinline poster="${imageUrl(camera,960,true)}"></video>`:`<img src="${imageUrl(camera,960,true)}" alt="${escapeHtml(camera.label)}" width="960" height="540">`}<img id="history-frame" class="history-frame" hidden alt="Historical frame for ${escapeHtml(camera.label)}"></div><section id="time-machine" class="time-machine" aria-live="polite"><div class="time-machine-empty"><strong>Traffic Time Machine</strong><span>Loading recent history…</span></div></section><div class="focus-actions"><button class="chip" data-focus="${escapeHtml(prev?.id||id)}">← Previous</button><button id="refresh-focus" class="chip">Refresh snapshot</button><button class="chip" data-focus="${escapeHtml(next?.id||id)}">Next →</button>${camera.webUrl?`<a class="chip" href="${escapeHtml(camera.webUrl)}" target="_blank" rel="noopener noreferrer">SDOT page</a>`:''}</div>${nearby?`<div class="nearby"><p>Nearby cameras</p>${nearby}</div>`:''}`;
   if (!modal.open) modal.showModal();
   $('#refresh-focus')?.addEventListener('click',()=>{const media=$('#focus-video')||modalBody.querySelector('img');if(media){if(media.tagName==='IMG')media.src=imageUrl(camera,960,true);else media.poster=imageUrl(camera,960,true);}});
   if (camera.videoUrl) setupVideo(camera);
   loadTimeMachine(camera);
 }
-
 function closeFocus() { stopTimelapse();focusHistory=null;destroyVideo();focusedId=null;updateUrl();modal.close(); }
 
 grid.addEventListener('click',(event)=>{
   const play=event.target.closest('[data-grid-play]');
   if (play) {
-    event.preventDefault();
-    event.stopPropagation();
+    event.preventDefault();event.stopPropagation();
     const id=play.dataset.gridPlay;
     if (gridPlayers.has(id)) stopGridVideo(id); else startGridVideo(id,'manual');
     return;
   }
-  const button=event.target.closest('.camera-open');if(button)openFocus(button.dataset.camera);
+  const target=event.target.closest('[data-camera-open],.camera-open');
+  if(target)openFocus(target.dataset.cameraOpen||target.dataset.camera);
+});
+grid.addEventListener('keydown',(event)=>{
+  const target=event.target.closest('[data-camera-open]');
+  if(!target||!['Enter',' '].includes(event.key))return;
+  event.preventDefault();openFocus(target.dataset.cameraOpen);
 });
 modalBody.addEventListener('click',(event)=>{const button=event.target.closest('[data-focus]');if(button)openFocus(button.dataset.focus);});
-close.addEventListener('click',closeFocus);modal.addEventListener('click',(event)=>{if(event.target===modal)closeFocus();});modal.addEventListener('close',()=>{stopTimelapse();focusHistory=null;destroyVideo();focusedId=null;updateUrl();});
+close.addEventListener('click',closeFocus);
+modal.addEventListener('click',(event)=>{if(event.target===modal)closeFocus();});
+modal.addEventListener('close',()=>{stopTimelapse();focusHistory=null;destroyVideo();focusedId=null;updateUrl();});
 search.addEventListener('input',refilter);
 collectionsEl.addEventListener('click',(event)=>{
   const button=event.target.closest('button');if(!button)return;
   if (button.dataset.liveGrid !== undefined) { setLiveGrid(!liveGridEnabled); return; }
   if(button.dataset.clearCollections!==undefined)activeCollections=[];
-  else if(button.dataset.collection){const id=button.dataset.collection;activeCollections=activeCollections.includes(id)?activeCollections.filter((x)=>x!==id):[...activeCollections,id];}
+  else if(button.dataset.collection){const id=button.dataset.collection;activeCollections=activeCollections.includes(id)?activeCollections.filter((item)=>item!==id):[...activeCollections,id];}
   refilter();
 });
 $('#match-all').addEventListener('click',()=>{collectionMode='all';$('#match-all').classList.add('active');$('#match-any').classList.remove('active');refilter();});
 $('#match-any').addEventListener('click',()=>{collectionMode='any';$('#match-any').classList.add('active');$('#match-all').classList.remove('active');refilter();});
-$('#grid-view').addEventListener('click',()=>setView('grid'));$('#map-view').addEventListener('click',()=>setView('map'));document.querySelectorAll('[data-mobile-view]').forEach((b)=>b.addEventListener('click',()=>setView(b.dataset.mobileView)));
+$('#grid-view').addEventListener('click',()=>setView('grid'));
+$('#map-view').addEventListener('click',()=>setView('map'));
+document.querySelectorAll('[data-mobile-view]').forEach((button)=>button.addEventListener('click',()=>setView(button.dataset.mobileView)));
 $('#settings-toggle').addEventListener('click',()=>{settings.hidden=!settings.hidden;$('#settings-toggle').setAttribute('aria-expanded',String(!settings.hidden));});
 $('#mobile-settings').addEventListener('click',()=>{settings.hidden=false;$('#settings-toggle').setAttribute('aria-expanded','true');scrollTo({top:0,behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth'});});
 $('#source-arcgis').addEventListener('click',()=>{source='arcgis';$('#source-arcgis').classList.add('active');$('#source-sdot').classList.remove('active');});
@@ -745,22 +612,26 @@ new IntersectionObserver(([entry])=>{if(entry.isIntersecting&&view==='grid'&&vis
 
 document.addEventListener('visibilitychange',()=>{
   if (document.hidden) stopAllGridVideo();
-  else if (liveGridEnabled && view === 'grid') syncLiveGrid();
+  else {
+    if (liveGridEnabled && view === 'grid') syncLiveGrid();
+    loadPulse(true);
+  }
 });
 setInterval(()=>{
   if (document.hidden) return;
-  document.querySelectorAll('.camera-card img:not([hidden])').forEach((img)=>{const card=img.closest('.camera-card');const camera=cameraById(card?.dataset.cameraId);if(camera)img.src=imageUrl(camera,480,true);});
+  document.querySelectorAll('.camera-card img:not([hidden])').forEach((img)=>{const cardEl=img.closest('.camera-card');const camera=cameraById(cardEl?.dataset.cameraId);if(camera)img.src=imageUrl(camera,480,true);});
 },30000);
 setInterval(()=>loadCameras(false),5*60*1000);
 setInterval(()=>loadPulse(false),PULSE_REFRESH_MS);
 setInterval(()=>{
-  if (activeCollections.includes('unusual')) refilter();
+  if (activeCollections.includes('recent') || activeCollections.includes('issues')) refilter();
   else { renderCollections(); updateCounts(); }
 },30000);
 
+loadStyle('/evidence.css');
 hydrateUrl();
-$('#match-all').classList.toggle('active',collectionMode==='all');$('#match-any').classList.toggle('active',collectionMode==='any');
+$('#match-all').classList.toggle('active',collectionMode==='all');
+$('#match-any').classList.toggle('active',collectionMode==='any');
 refilter();setView(view);renderDiagnostics();renderPulse();
 queueMicrotask(()=>loadPulse(false));
 if (focusedId) queueMicrotask(()=>openFocus(focusedId));
-import('/phase2.js').catch(()=>{});
