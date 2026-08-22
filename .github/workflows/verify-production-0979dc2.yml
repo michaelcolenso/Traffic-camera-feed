@@ -1,0 +1,65 @@
+name: Verify production 0979dc2
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify cams.hoxel.dev release
+        shell: bash
+        run: |
+          set -euo pipefail
+          healthy=0
+          for attempt in {1..18}; do
+            nonce="$(date +%s%N)"
+            home="$(curl -fsS --max-time 12 "https://cams.hoxel.dev/?verify=${nonce}" 2>/dev/null || true)"
+            js="$(curl -fsS --max-time 12 "https://cams.hoxel.dev/benchmark.js?verify=${nonce}" 2>/dev/null || true)"
+            cameras="$(curl -fsS --max-time 12 "https://cams.hoxel.dev/api/cameras?source=arcgis&verify=${nonce}" 2>/dev/null || true)"
+            history="$(curl -fsS --max-time 12 "https://cams.hoxel.dev/api/history/status?verify=${nonce}" 2>/dev/null || true)"
+            pulse="$(curl -fsS --max-time 12 "https://cams.hoxel.dev/api/pulse?limit=24&verify=${nonce}" 2>/dev/null || true)"
+
+            if grep -q 'Seattle Traffic Watch' <<<"$home" \
+              && grep -q 'data-collection="live"' <<<"$home" \
+              && grep -Fq 'if (!enabled) {' <<<"$js" \
+              && grep -Fq '} else if (!grid.hidden) {' <<<"$js" \
+              && grep -Fq 'syncLiveGrid();' <<<"$js" \
+              && jq -e 'type == "array" and length > 0 and (.[0].collections | type == "array")' <<<"$cameras" >/dev/null 2>&1 \
+              && jq -e 'has("frames") and has("cameras") and has("latest")' <<<"$history" >/dev/null 2>&1 \
+              && jq -e '(.items | type == "array") and (.events | type == "array") and has("camerasAnalyzed")' <<<"$pulse" >/dev/null 2>&1; then
+              printf '%s' "$cameras" > /tmp/cameras.json
+              healthy=1
+              echo "Production release signature and core APIs verified on attempt ${attempt}."
+              break
+            fi
+            echo "Production not fully reconciled yet (${attempt}/18)."
+            sleep 5
+          done
+          test "$healthy" -eq 1
+
+          first_image_path="$(jq -r '.[0].imagePath // empty' /tmp/cameras.json)"
+          first_camera_id="$(jq -r '.[0].id // empty' /tmp/cameras.json)"
+          test -n "$first_image_path"
+          test -n "$first_camera_id"
+          encoded_image="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$first_image_path")"
+          encoded_camera="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$first_camera_id")"
+
+          curl -fsS --max-time 15 -o /tmp/image "https://cams.hoxel.dev/api/image?path=${encoded_image}&w=480"
+          timeline="$(curl -fsS --max-time 15 "https://cams.hoxel.dev/api/history?camera=${encoded_camera}&hours=6&limit=96")"
+          jq -e '.cameraId and (.frames | type == "array")' <<<"$timeline" >/dev/null
+
+          video_code="$(curl -sS --max-time 12 -o /tmp/video-error -w '%{http_code}' https://cams.hoxel.dev/api/video)"
+          image_code="$(curl -sS --max-time 12 -o /tmp/image-error -w '%{http_code}' https://cams.hoxel.dev/api/image)"
+          test "$video_code" = 400
+          test "$image_code" = 400
+          grep -q 'Invalid video path' /tmp/video-error
+          grep -q 'Bad image path' /tmp/image-error
+
+          echo 'Production verification passed: merged Live Grid control flow, canonical cameras, transformed images, history, timeline, Pulse, and API error contracts are live.'
