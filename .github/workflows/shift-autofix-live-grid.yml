@@ -1,0 +1,82 @@
+name: Shift Live Grid autofix
+
+on:
+  push:
+    branches:
+      - shift/pulse-truth-and-ux
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: shift/pulse-truth-and-ux
+          fetch-depth: 0
+      - name: Keep prewarmed auto streams alive
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('prototype/vanilla/public/benchmark.js')
+          s = p.read_text()
+          anchor = """function bindImageHealth(root = grid) {
+            root.querySelectorAll('.camera-card img').forEach((img) => {
+              if (img.dataset.healthBound) return;
+              img.dataset.healthBound = '1';
+              const camera = cameraById(img.closest('.camera-card')?.dataset.cameraId);
+              if (!camera) return;
+              img.addEventListener('load', () => noteHealth(camera,'refresh'));
+              img.addEventListener('error', () => noteHealth(camera,'image-error'));
+            });
+          }
+          """
+          helper = anchor + """function inLiveGridWindow(cardEl) {
+            const rect = cardEl.getBoundingClientRect();
+            return rect.bottom >= -120 && rect.top <= innerHeight + 720;
+          }
+          """
+          if anchor not in s:
+              raise SystemExit('bindImageHealth anchor not found')
+          s = s.replace(anchor, helper, 1)
+          old_observer = """    else {
+                visibleCards.delete(id);
+                if (gridPlayers.has(id)) stopGridVideo(id);
+              }
+          """
+          new_observer = """    else {
+                visibleCards.delete(id);
+                const player = gridPlayers.get(id);
+                const keepPrewarmed = player?.mode === 'auto' && liveGridEnabled && inLiveGridWindow(cardEl);
+                if (player && !keepPrewarmed) stopGridVideo(id);
+              }
+          """
+          if old_observer not in s:
+              raise SystemExit('observer block not found')
+          s = s.replace(old_observer, new_observer, 1)
+          old_near = """  const nearViewport = [...grid.querySelectorAll('.camera-card')]
+            .map((cardEl) => {
+              const rect = cardEl.getBoundingClientRect();
+              return rect.bottom >= -120 && rect.top <= innerHeight + 720 ? cameraById(cardEl.dataset.cameraId) : null;
+            })
+            .filter((camera) => camera?.videoUrl);
+          """
+          new_near = """  const nearViewport = [...grid.querySelectorAll('.camera-card')]
+            .map((cardEl) => inLiveGridWindow(cardEl) ? cameraById(cardEl.dataset.cameraId) : null)
+            .filter((camera) => camera?.videoUrl);
+          """
+          if old_near not in s:
+              raise SystemExit('near viewport block not found')
+          s = s.replace(old_near, new_near, 1)
+          p.write_text(s)
+          PY
+          rm .github/workflows/shift-autofix-live-grid.yml
+          node --check prototype/vanilla/public/benchmark.js
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add prototype/vanilla/public/benchmark.js .github/workflows/shift-autofix-live-grid.yml
+          git commit -m 'fix: preserve Live Grid prewarm streams'
+          git push origin HEAD:shift/pulse-truth-and-ux
