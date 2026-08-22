@@ -71,6 +71,7 @@ try {
   await page.waitForTimeout(100);
   await page.locator('[data-live-grid]').click();
   await page.waitForTimeout(350);
+  console.log('LIVE_GRID_DEEP', JSON.stringify(await page.evaluate(() => ({entry:window.__LIVE_GRID_ENTRY__||null,selection:window.__LIVE_GRID_SELECTION__||null,gridHidden:document.querySelector('#grid')?.hidden,pressed:document.querySelector('[data-live-grid]')?.getAttribute('aria-pressed')}))));
   const autoVideos = page.locator('.camera-card.is-live .grid-video');
   const autoCount = await autoVideos.count();
   check(autoCount > 0, 'Live Grid did not start streams as live cameras entered view');
