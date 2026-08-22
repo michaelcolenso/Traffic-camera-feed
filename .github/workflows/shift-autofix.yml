@@ -1,0 +1,61 @@
+name: Shift autofix
+
+on:
+  push:
+    branches:
+      - shift/pulse-truth-and-ux
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: shift/pulse-truth-and-ux
+          fetch-depth: 0
+      - name: Patch Live Grid viewport eligibility
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('prototype/vanilla/public/benchmark.js')
+          s = p.read_text()
+          old = """function syncLiveGrid() {
+            if (!liveGridEnabled || view !== 'grid' || document.hidden) return;
+            const autoCandidates = [...visibleCards].map(cameraById).filter((camera)=>camera?.videoUrl).slice(0,MAX_AUTO_LIVE);
+            const target = new Set(autoCandidates.map((camera)=>camera.id));
+            for (const [id,player] of gridPlayers) if (player.mode === 'auto' && !target.has(id)) stopGridVideo(id);
+            for (const camera of autoCandidates) if (!gridPlayers.has(camera.id)) startGridVideo(camera.id,'auto');
+          }
+          """
+          new = """function syncLiveGrid() {
+            if (!liveGridEnabled || view !== 'grid' || document.hidden) return;
+            const nearViewport = [...grid.querySelectorAll('.camera-card')]
+              .map((cardEl) => {
+                const rect = cardEl.getBoundingClientRect();
+                return rect.bottom >= -120 && rect.top <= innerHeight + 720 ? cameraById(cardEl.dataset.cameraId) : null;
+              })
+              .filter((camera) => camera?.videoUrl);
+            const candidates = [...visibleCards].map(cameraById).filter((camera)=>camera?.videoUrl).concat(nearViewport);
+            const autoCandidates = [...new Map(candidates.map((camera)=>[camera.id,camera])).values()].slice(0,MAX_AUTO_LIVE);
+            const target = new Set(autoCandidates.map((camera)=>camera.id));
+            for (const [id,player] of gridPlayers) if (player.mode === 'auto' && !target.has(id)) stopGridVideo(id);
+            for (const camera of autoCandidates) if (!gridPlayers.has(camera.id)) startGridVideo(camera.id,'auto');
+          }
+          """
+          if old not in s:
+              raise SystemExit('syncLiveGrid target not found')
+          s = s.replace(old, new)
+          s = s.replace("}, {threshold:[0,0.05,0.25,0.6],rootMargin:'80px 0px'});", "}, {threshold:[0,0.05,0.25,0.6],rootMargin:'480px 0px'});")
+          p.write_text(s)
+          PY
+          rm .github/workflows/shift-autofix.yml
+          node --check prototype/vanilla/public/benchmark.js
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add prototype/vanilla/public/benchmark.js .github/workflows/shift-autofix.yml
+          git commit -m 'fix: make Live Grid viewport activation deterministic'
+          git push origin HEAD:shift/pulse-truth-and-ux
