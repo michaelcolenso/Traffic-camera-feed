@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - prototype/cloudflare-vanilla
+      - shift/pulse-truth-and-ux
   workflow_dispatch:
 
 permissions:
