@@ -1,0 +1,64 @@
+name: Apply Live Grid control-flow fix
+
+on:
+  push:
+    branches:
+      - shift/pulse-truth-and-ux
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: shift/pulse-truth-and-ux
+          fetch-depth: 0
+      - name: Fix Live Grid enable path and remove diagnostics
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          js = Path('prototype/vanilla/public/benchmark.js')
+          s = js.read_text()
+          s = s.replace("  window.__LIVE_GRID_ENTRY__ = {liveGridEnabled,gridHidden:grid.hidden,documentHidden:document.hidden,cardCount:grid.querySelectorAll('.camera-card').length};\n", "")
+          s = s.replace("  window.__LIVE_GRID_SELECTION__ = {visibleIds:[...visibleCards],nearViewport:nearViewport.map((camera)=>({id:camera.id,videoUrl:camera.videoUrl})),candidateIds:candidates.map((camera)=>camera.id),autoIds:autoCandidates.map((camera)=>camera.id),playerIds:[...gridPlayers.keys()]};\n", "")
+          old = """function setLiveGrid(enabled) {
+            liveGridEnabled = enabled;
+            if (!enabled) for (const [id,player] of [...gridPlayers]) if (player.mode === 'auto') stopGridVideo(id);
+            else if (!grid.hidden) syncLiveGrid();
+            renderCollections();
+          }
+          """
+          new = """function setLiveGrid(enabled) {
+            liveGridEnabled = enabled;
+            if (!enabled) {
+              for (const [id,player] of [...gridPlayers]) {
+                if (player.mode === 'auto') stopGridVideo(id);
+              }
+            } else if (!grid.hidden) {
+              syncLiveGrid();
+            }
+            renderCollections();
+          }
+          """
+          if old not in s:
+              raise SystemExit('setLiveGrid target not found')
+          s = s.replace(old, new, 1)
+          js.write_text(s)
+
+          test = Path('tests/vanilla-parity.mjs')
+          t = test.read_text()
+          debug = "  console.log('LIVE_GRID_DEEP', JSON.stringify(await page.evaluate(() => ({entry:window.__LIVE_GRID_ENTRY__||null,selection:window.__LIVE_GRID_SELECTION__||null,gridHidden:document.querySelector('#grid')?.hidden,pressed:document.querySelector('[data-live-grid]')?.getAttribute('aria-pressed')}))));\n"
+          t = t.replace(debug, "")
+          test.write_text(t)
+          PY
+          rm .github/workflows/shift-fix-live-grid-dangling-else.yml
+          node --check prototype/vanilla/public/benchmark.js
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add prototype/vanilla/public/benchmark.js tests/vanilla-parity.mjs .github/workflows/shift-fix-live-grid-dangling-else.yml
+          git commit -m 'fix: run Live Grid enable path'
+          git push origin HEAD:shift/pulse-truth-and-ux
