@@ -67,10 +67,11 @@ try {
   await page.locator('[data-collection="live"]').click();
   await page.waitForTimeout(100);
   await page.locator('[data-live-grid]').click();
-  await page.waitForTimeout(180);
+  await page.locator('.camera-card').first().scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
   const autoVideos = page.locator('.camera-card.is-live .grid-video');
   const autoCount = await autoVideos.count();
-  check(autoCount > 0, 'Live Grid did not start any visible streams');
+  check(autoCount > 0, 'Live Grid did not start streams as live cameras entered view');
   check(autoCount <= 4, `Live Grid exceeded four-stream cap (${autoCount})`);
   check(await page.locator('[data-live-grid]').getAttribute('aria-pressed') === 'true', 'Live Grid pressed state missing');
   if (autoCount) {
