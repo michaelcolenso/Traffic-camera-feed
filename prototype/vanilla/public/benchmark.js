@@ -127,7 +127,7 @@ function card(camera, index) {
     ? `<button class="grid-play" type="button" data-grid-play="${escapeHtml(camera.id)}" aria-label="Play live video for ${escapeHtml(camera.label)}"><span class="play-icon">▶</span><span class="play-label">Play live</span></button>`
     : '';
   const meta = observationMeta(camera);
-  return `<article class="camera-card" data-camera-id="${escapeHtml(camera.id)}"><div class="image-shell" data-camera-open="${escapeHtml(camera.id)}" role="button" tabindex="0" aria-label="View ${escapeHtml(camera.label)}"><img src="${imageUrl(camera)}" alt="${escapeHtml(camera.label)}" width="480" height="270" ${index ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async">${liveControl}<span class="live-badge" hidden>LIVE</span></div><button class="camera-open" data-camera="${escapeHtml(camera.id)}" aria-label="View ${escapeHtml(camera.label)}"><div class="card-copy"><h2>${escapeHtml(camera.label)}</h2><span${meta.title?` title="${escapeHtml(meta.title)}"`:''}>${escapeHtml(meta.text)}</span></div></button></article>`;
+  return `<article class="camera-card" data-camera-id="${escapeHtml(camera.id)}"><div class="image-shell"><button class="camera-image-open" type="button" data-camera="${escapeHtml(camera.id)}" aria-label="View ${escapeHtml(camera.label)}"><img src="${imageUrl(camera)}" alt="${escapeHtml(camera.label)}" width="480" height="270" ${index ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async"></button>${liveControl}<span class="live-badge" hidden>LIVE</span></div><button class="camera-open" type="button" data-camera="${escapeHtml(camera.id)}" aria-label="View ${escapeHtml(camera.label)}"><div class="card-copy"><h2>${escapeHtml(camera.label)}</h2><span${meta.title?` title="${escapeHtml(meta.title)}"`:''}>${escapeHtml(meta.text)}</span></div></button></article>`;
 }
 function updateObservationBadges() {
   grid.querySelectorAll('.camera-card').forEach((cardEl) => {
@@ -389,7 +389,7 @@ async function startGridVideo(id, mode = 'manual') {
   video.preload = 'none';
   video.poster = imageUrl(camera,480,true);
   video.setAttribute('aria-label',`Live video for ${camera.label}`);
-  shell.insertBefore(video,img);
+  shell.insertBefore(video,shell.firstChild);
   const player = {video,hls:null,mode};
   gridPlayers.set(id,player);
   const button = cardEl.querySelector('[data-grid-play]');
@@ -576,13 +576,8 @@ grid.addEventListener('click',(event)=>{
     if (gridPlayers.has(id)) stopGridVideo(id); else startGridVideo(id,'manual');
     return;
   }
-  const target=event.target.closest('[data-camera-open],.camera-open');
-  if(target)openFocus(target.dataset.cameraOpen||target.dataset.camera);
-});
-grid.addEventListener('keydown',(event)=>{
-  const target=event.target.closest('[data-camera-open]');
-  if(!target||!['Enter',' '].includes(event.key))return;
-  event.preventDefault();openFocus(target.dataset.cameraOpen);
+  const target=event.target.closest('.camera-image-open,.camera-open');
+  if(target)openFocus(target.dataset.camera);
 });
 modalBody.addEventListener('click',(event)=>{const button=event.target.closest('[data-focus]');if(button)openFocus(button.dataset.focus);});
 close.addEventListener('click',closeFocus);
