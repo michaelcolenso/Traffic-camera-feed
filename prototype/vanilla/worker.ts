@@ -224,6 +224,7 @@ function page(cameras: Camera[]): Response {
     <title>Seattle Traffic Watch</title>
     <meta name="description" content="Fast, filterable Seattle traffic camera snapshots and live feeds.">
     <link rel="stylesheet" href="/benchmark.css">
+    <link rel="stylesheet" href="/evidence.css">
   </head><body>
     <header class="topbar">
       <div class="brand"><p class="eyebrow">Seattle traffic telemetry</p><h1>Seattle Traffic Watch</h1><p id="status-line" class="sub">${cameras.length} cameras · ArcGIS source</p></div>
