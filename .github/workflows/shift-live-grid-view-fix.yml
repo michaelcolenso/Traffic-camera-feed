@@ -1,0 +1,39 @@
+name: Apply Live Grid view-state fix
+
+on:
+  push:
+    branches:
+      - shift/pulse-truth-and-ux
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: shift/pulse-truth-and-ux
+          fetch-depth: 0
+      - name: Use rendered Grid state for autoplay
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('prototype/vanilla/public/benchmark.js')
+          s = p.read_text()
+          s = s.replace("if (!liveGridEnabled || view !== 'grid' || document.hidden) return;", "if (!liveGridEnabled || grid.hidden || document.hidden) return;", 1)
+          s = s.replace("else if (view === 'grid') syncLiveGrid();", "else if (!grid.hidden) syncLiveGrid();", 1)
+          diagnostic = "  window.__LIVE_GRID_DEBUG__ = {view,liveGridEnabled,gridHidden:grid.hidden,visibleIds:[...visibleCards],nearViewport:nearViewport.map((camera)=>camera.id),candidateIds:candidates.map((camera)=>camera.id),autoIds:autoCandidates.map((camera)=>camera.id)};\n"
+          s = s.replace(diagnostic, "", 1)
+          if "if (!liveGridEnabled || grid.hidden || document.hidden) return;" not in s:
+              raise SystemExit('Live Grid gate patch failed')
+          p.write_text(s)
+          PY
+          rm .github/workflows/shift-live-grid-view-fix.yml
+          node --check prototype/vanilla/public/benchmark.js
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add prototype/vanilla/public/benchmark.js .github/workflows/shift-live-grid-view-fix.yml
+          git commit -m 'fix: derive Live Grid state from rendered view'
+          git push origin HEAD:shift/pulse-truth-and-ux
