@@ -78,7 +78,7 @@ try {
   check(await page.locator('.camera-card.is-live .grid-video').count() === 0, 'Live Grid auto streams did not stop when disabled');
   await page.locator('[data-clear-collections]').click();
 
-  await page.locator('[data-camera-open]').first().click();
+  await page.locator('.camera-image-open').first().click();
   check(await page.locator('#modal[open]').count() === 1, 'camera image did not open focus modal');
   const firstFocused = new URL(page.url()).searchParams.get('camera');
   await page.screenshot({ path: 'test-artifacts/mobile-focus.png', fullPage: true });
