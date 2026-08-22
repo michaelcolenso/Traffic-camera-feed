@@ -37,6 +37,7 @@ try {
   const bootstrap = await page.evaluate(() => window.__CAMERAS__ || []);
   check(bootstrap.length > 0, 'bootstrap camera data missing');
   check(bootstrap.every((camera) => Array.isArray(camera.collections)), 'canonical camera collections missing from bootstrap payload');
+  check(!bootstrap.some((camera) => /\b35th\b/i.test(camera.label) && camera.collections.includes('downtown')), '35th camera misclassified as Downtown');
   const i5Count = bootstrap.filter((camera) => camera.collections.includes('i5')).length;
   check((await page.locator('[data-collection="i5"]').count() > 0) === (i5Count > 0), 'I-5 collection visibility does not match canonical camera data');
 
