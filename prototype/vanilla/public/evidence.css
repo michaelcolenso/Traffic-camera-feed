@@ -1,4 +1,4 @@
-/* Evidence-first refinements layered after benchmark.css. Deep Live Grid diagnostic checkpoint. */
+/* Evidence-first refinements layered after benchmark.css. */
 .camera-image-open{display:block;width:100%;height:100%;border:0;padding:0;background:transparent;color:inherit;cursor:pointer;outline:none}
 .camera-image-open:focus-visible{box-shadow:inset 0 0 0 2px #67e8f9}
 .camera-card.is-live .camera-image-open{visibility:hidden}
