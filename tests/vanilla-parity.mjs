@@ -71,29 +71,6 @@ try {
   await page.waitForTimeout(100);
   await page.locator('[data-live-grid]').click();
   await page.waitForTimeout(350);
-  const liveDebug = await page.evaluate(() => ({
-    hidden: document.hidden,
-    visibilityState: document.visibilityState,
-    scrollY,
-    pressed: document.querySelector('[data-live-grid]')?.getAttribute('aria-pressed'),
-    internal: window.__LIVE_GRID_DEBUG__ || null,
-    totalVideos: document.querySelectorAll('.grid-video').length,
-    playingVideos: document.querySelectorAll('.camera-card.is-live .grid-video').length,
-    cards: [...document.querySelectorAll('.camera-card')].slice(0, 6).map((card) => {
-      const rect = card.getBoundingClientRect();
-      const play = card.querySelector('[data-grid-play]');
-      return {
-        id: card.dataset.cameraId,
-        top: Math.round(rect.top),
-        bottom: Math.round(rect.bottom),
-        isLive: card.classList.contains('is-live'),
-        videoCount: card.querySelectorAll('.grid-video').length,
-        playLabel: play?.getAttribute('aria-label'),
-        connecting: play?.classList.contains('is-connecting'),
-      };
-    }),
-  }));
-  console.log('LIVE_GRID_DEBUG', JSON.stringify(liveDebug));
   const autoVideos = page.locator('.camera-card.is-live .grid-video');
   const autoCount = await autoVideos.count();
   check(autoCount > 0, 'Live Grid did not start streams as live cameras entered view');
