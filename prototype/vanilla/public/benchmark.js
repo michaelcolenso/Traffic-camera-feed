@@ -162,7 +162,7 @@ const cardObserver = new IntersectionObserver((entries) => {
     }
   }
   if (liveGridEnabled && view === 'grid') syncLiveGrid();
-}, {threshold:[0,0.05,0.25,0.6],rootMargin:'80px 0px'});
+}, {threshold:[0,0.05,0.25,0.6],rootMargin:'480px 0px'});
 function observeCards(root = grid) {
   root.querySelectorAll('.camera-card').forEach((cardEl) => {
     if (cardEl.dataset.liveObserved) return;
@@ -413,7 +413,14 @@ async function startGridVideo(id, mode = 'manual') {
 }
 function syncLiveGrid() {
   if (!liveGridEnabled || view !== 'grid' || document.hidden) return;
-  const autoCandidates = [...visibleCards].map(cameraById).filter((camera)=>camera?.videoUrl).slice(0,MAX_AUTO_LIVE);
+  const nearViewport = [...grid.querySelectorAll('.camera-card')]
+    .map((cardEl) => {
+      const rect = cardEl.getBoundingClientRect();
+      return rect.bottom >= -120 && rect.top <= innerHeight + 720 ? cameraById(cardEl.dataset.cameraId) : null;
+    })
+    .filter((camera) => camera?.videoUrl);
+  const candidates = [...visibleCards].map(cameraById).filter((camera)=>camera?.videoUrl).concat(nearViewport);
+  const autoCandidates = [...new Map(candidates.map((camera)=>[camera.id,camera])).values()].slice(0,MAX_AUTO_LIVE);
   const target = new Set(autoCandidates.map((camera)=>camera.id));
   for (const [id,player] of gridPlayers) if (player.mode === 'auto' && !target.has(id)) stopGridVideo(id);
   for (const camera of autoCandidates) if (!gridPlayers.has(camera.id)) startGridVideo(camera.id,'auto');
