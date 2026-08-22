@@ -4,7 +4,9 @@ on:
   push:
     branches:
       - prototype/cloudflare-vanilla
-      - shift/pulse-truth-and-ux
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -28,6 +30,9 @@ jobs:
 
       - name: Existing TypeScript regression check
         run: npm run lint
+
+      - name: Browser module syntax check
+        run: node --check prototype/vanilla/public/benchmark.js
 
       - name: Validate prototype and production Wrangler configurations
         run: |
@@ -76,7 +81,7 @@ jobs:
           npx playwright install chromium --with-deps >/dev/null
           node tests/vanilla-parity.mjs
 
-      - name: Benchmark React production and vanilla replacement
+      - name: Benchmark production and candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -110,7 +115,7 @@ jobs:
               }
           data={app:[row(app,i) for i in (1,2,3)] for app in ('react','vanilla')}
           with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
-              f.write('\n## React vs Cloudflare-native feature-parity replacement\n\n')
+              f.write('\n## Production vs Cloudflare-native candidate\n\n')
               f.write('| App | Scores | Min | Median | LCP median | TBT median | CLS max | Transfer median | A11y min |\n')
               f.write('|---|---|---:|---:|---:|---:|---:|---:|---:|\n')
               for app, rows in data.items():
