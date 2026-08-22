@@ -1,0 +1,40 @@
+name: Apply final Live Grid fix
+on:
+  push:
+    branches: [shift/pulse-truth-and-ux]
+    paths: ['.github/workflows/fix-live-grid-final.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: shift/pulse-truth-and-ux
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - name: Patch Live Grid scheduling and remove diagnostics
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('prototype/vanilla/public/benchmark.js')
+          s=p.read_text()
+          s=s.replace("function setLiveGrid(enabled) {\n  liveGridEnabled = enabled;\n  if (!enabled) {\n    for (const [id,player] of [...gridPlayers]) {\n      if (player.mode === 'auto') stopGridVideo(id);\n    }\n  } else if (!grid.hidden) {\n    syncLiveGrid();\n  }\n  renderCollections();\n}", "function setLiveGrid(enabled) {\n  liveGridEnabled = enabled;\n  if (!enabled) {\n    for (const [id,player] of [...gridPlayers]) {\n      if (player.mode === 'auto') stopGridVideo(id);\n    }\n  } else {\n    // Filtering and collection rendering can replace grid DOM during the same click.\n    // Reconcile after the current task and again on the next paint so autoplay uses\n    // the final rendered cards rather than transient view state.\n    queueMicrotask(syncLiveGrid);\n    requestAnimationFrame(syncLiveGrid);\n  }\n  renderCollections();\n}")
+          s=s.replace("  window.__LIVE_GRID_ENTRY__ = {liveGridEnabled,gridHidden:grid.hidden,documentHidden:document.hidden,cardCount:grid.querySelectorAll('.camera-card').length};\n","")
+          s=s.replace("  window.__LIVE_GRID_SELECTION__ = {visibleIds:[...visibleCards],nearViewport:nearViewport.map((camera)=>({id:camera.id,videoUrl:camera.videoUrl})),candidateIds:candidates.map((camera)=>camera.id),autoIds:autoCandidates.map((camera)=>camera.id),playerIds:[...gridPlayers.keys()]};\n","")
+          p.write_text(s)
+
+          t=Path('tests/vanilla-parity.mjs')
+          q=t.read_text()
+          import re
+          q=re.sub(r"\n  console\.log\('LIVE_GRID_DEEP'.*?\);", "", q)
+          t.write_text(q)
+          PY
+          rm .github/workflows/fix-live-grid-final.yml
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add prototype/vanilla/public/benchmark.js tests/vanilla-parity.mjs .github/workflows/fix-live-grid-final.yml
+          git commit -m 'fix: reconcile Live Grid after collection render'
+          git push origin HEAD:shift/pulse-truth-and-ux
