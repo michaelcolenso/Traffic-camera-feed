@@ -158,7 +158,8 @@ const cardObserver = new IntersectionObserver((entries) => {
     if (entry.isIntersecting && entry.intersectionRatio >= 0.05) visibleCards.add(id);
     else {
       visibleCards.delete(id);
-      if (gridPlayers.has(id)) stopGridVideo(id);
+      const player = gridPlayers.get(id);
+      if (player?.mode === 'manual') stopGridVideo(id);
     }
   }
   if (liveGridEnabled && view === 'grid') syncLiveGrid();
