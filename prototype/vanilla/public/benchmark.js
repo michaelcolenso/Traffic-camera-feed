@@ -422,6 +422,7 @@ function syncLiveGrid() {
     .filter((camera) => camera?.videoUrl);
   const candidates = [...visibleCards].map(cameraById).filter((camera)=>camera?.videoUrl).concat(nearViewport);
   const autoCandidates = [...new Map(candidates.map((camera)=>[camera.id,camera])).values()].slice(0,MAX_AUTO_LIVE);
+  window.__LIVE_GRID_DEBUG__ = {view,liveGridEnabled,gridHidden:grid.hidden,visibleIds:[...visibleCards],nearViewport:nearViewport.map((camera)=>camera.id),candidateIds:candidates.map((camera)=>camera.id),autoIds:autoCandidates.map((camera)=>camera.id)};
   const target = new Set(autoCandidates.map((camera)=>camera.id));
   for (const [id,player] of gridPlayers) if (player.mode === 'auto' && !target.has(id)) stopGridVideo(id);
   for (const camera of autoCandidates) if (!gridPlayers.has(camera.id)) startGridVideo(camera.id,'auto');
