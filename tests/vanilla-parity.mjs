@@ -66,9 +66,11 @@ try {
 
   await page.locator('[data-collection="live"]').click();
   await page.waitForTimeout(100);
+  const firstLiveCard = page.locator('.camera-card').first();
+  await firstLiveCard.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(100);
   await page.locator('[data-live-grid]').click();
-  await page.locator('.camera-card').first().scrollIntoViewIfNeeded();
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(350);
   const autoVideos = page.locator('.camera-card.is-live .grid-video');
   const autoCount = await autoVideos.count();
   check(autoCount > 0, 'Live Grid did not start streams as live cameras entered view');
@@ -104,8 +106,6 @@ try {
   check(await page.locator('#settings').isVisible(), 'source settings missing');
   check(await page.locator('#settings-toggle').getAttribute('aria-expanded') === 'true', 'settings expanded state missing');
 
-  // Verify the source switch behavior without making functional parity depend on
-  // Seattle's live Socrata availability from the GitHub-hosted runner.
   await page.route('**/api/cameras?source=sdot**', async (route) => {
     await route.fulfill({
       status: 200,
@@ -126,8 +126,6 @@ try {
     failures.push('bootstrap camera image path missing');
   }
 
-  // The real endpoint must exist and return either current data or the explicit
-  // upstream-unavailable response; a missing/broken route is still a failure.
   await page.unroute('**/api/cameras?source=sdot**');
   const realSdot = await page.request.get(`${base}/api/cameras?source=sdot`);
   check([200, 503].includes(realSdot.status()), `unexpected SDOT route status ${realSdot.status()}`);
