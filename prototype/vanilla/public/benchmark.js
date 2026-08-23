@@ -1,5 +1,7 @@
 const DEFAULT_ARCGIS = window.__DEFAULT_ARCGIS__;
 let cameras = window.__CAMERAS__ || [];
+const bootstrapCameraCount = Number(window.__CAMERA_COUNT__ || cameras.length);
+let catalogReady = cameras.length >= bootstrapCameraCount;
 let filtered = cameras;
 let visible = matchMedia('(min-width:768px)').matches ? 16 : 6;
 let source = 'arcgis';
@@ -24,6 +26,7 @@ let focusHistory = null;
 let timelapseTimer = null;
 let pulse = null;
 let pulseByCamera = new Map();
+let activePulseEventId = null;
 const PULSE_REFRESH_MS = 60000;
 
 const $ = (selector) => document.querySelector(selector);
@@ -188,6 +191,19 @@ function renderGrid(reset = false) {
   bindImageHealth();
   observeCards();
 }
+function hydrateServerGrid() {
+  if (search.value || activeCollections.length || !grid.children.length) return false;
+  filtered = cameras;
+  visible = matchMedia('(min-width:768px)').matches ? 16 : 6;
+  // The Worker already rendered the first viewport and truthful city-wide counts.
+  // Bind behavior in place; the full catalog will append/upgrade after first paint.
+  empty.hidden = true;
+  sentinel.hidden = true;
+  bindImageHealth();
+  observeCards();
+  updateUrl();
+  return true;
+}
 function renderCollections() {
   const chips = COLLECTIONS.map(([id,label,description]) => {
     const count = cameras.filter((camera) => matchesCollection(camera,id)).length;
@@ -239,9 +255,21 @@ async function loadCameras(force = false) {
     if (!response.ok) throw new Error(`Feed returned ${response.status}`);
     const next = await response.json();
     if (!Array.isArray(next)) throw new Error('Unexpected camera payload');
+    const upgradingBootstrap = !catalogReady && source === 'arcgis' && !force && featureService === DEFAULT_ARCGIS;
     cameras = next;
+    window.__CAMERAS__ = next;
+    catalogReady = true;
     lastSync = Date.now();
-    refilter();
+    if (upgradingBootstrap && !search.value && !activeCollections.length && view === 'grid') {
+      filtered = cameras;
+      visible = matchMedia('(min-width:768px)').matches ? 16 : 6;
+      renderGrid(false);
+      renderCollections();
+      updateCounts();
+      updateUrl();
+    } else {
+      refilter();
+    }
     if (!diagnostics.hidden) renderDiagnostics();
   } catch (error) {
     sourceError.textContent = error instanceof Error ? error.message : 'Camera feed unavailable';
@@ -293,16 +321,22 @@ async function ensureMap() {
 function renderMapMarkers() {
   if (!map) return;
   mapMarkers.forEach((marker)=>marker.remove()); mapMarkers=[];
-  const mappable = filtered.filter((camera)=>Number.isFinite(camera.lat)&&Number.isFinite(camera.lng));
-  $('#map-count').textContent = `${mappable.length} active cameras`;
+  const filteredMappable = filtered.filter((camera)=>Number.isFinite(camera.lat)&&Number.isFinite(camera.lng));
+  const activeEvent=pulseEventById(activePulseEventId);
+  const eventMembers=pulseEventCameras(activeEvent);
+  const eventIds=new Set(activeEvent?.cameraIds||[]);
+  const mappable=activeEvent ? [...new Map([...filteredMappable,...eventMembers].map((camera)=>[camera.id,camera])).values()] : filteredMappable;
+  $('#map-count').textContent = activeEvent ? `${eventMembers.length} cameras in active area · ${filteredMappable.length} filtered` : `${mappable.length} active cameras`;
   for (const camera of mappable) {
     const el=document.createElement('button');
-    el.className=`camera-marker ${camera.videoUrl?'live':''} ${getHealth(camera).lastImageError?'issue':''} ${isUnusual(camera)?'changed':''}`;
+    const inEvent=eventIds.has(camera.id);
+    el.className=`camera-marker ${camera.videoUrl?'live':''} ${getHealth(camera).lastImageError?'issue':''} ${isUnusual(camera)?'changed':''} ${inEvent?'event-active':activeEvent?'event-muted':''}`;
     el.title=camera.label;
-    el.setAttribute('aria-label',`View ${camera.label}`);
+    el.setAttribute('aria-label',`${inEvent?'Active area camera: ':'View '}${camera.label}`);
     el.addEventListener('click',(event)=>{event.stopPropagation();openFocus(camera.id);map.flyTo({center:[camera.lng,camera.lat],zoom:Math.max(map.getZoom(),13)});});
     mapMarkers.push(new maplibregl.Marker({element:el}).setLngLat([camera.lng,camera.lat]).addTo(map));
   }
+  renderPulseEventHud();
 }
 function fitMap() {
   if (!map) return;
@@ -517,6 +551,57 @@ async function loadTimeMachine(camera){
 }
 
 function pulseCamera(item) { return cameraById(item.cameraId); }
+function pulseEventById(id) {
+  if (!id) return null;
+  return (pulse?.events||[]).find((event)=>event.id===id)||null;
+}
+function pulseEventCameras(event) {
+  return (event?.cameraIds||[]).map(cameraById).filter((camera)=>camera&&Number.isFinite(camera.lat)&&Number.isFinite(camera.lng));
+}
+function renderPulseEventHud() {
+  if (!mapEl) return;
+  let hud=$('#pulse-event-hud');
+  if (!hud) {
+    mapEl.insertAdjacentHTML('beforeend','<aside id="pulse-event-hud" class="pulse-event-hud" hidden></aside>');
+    hud=$('#pulse-event-hud');
+  }
+  const event=pulseEventById(activePulseEventId);
+  if (!event) { hud.hidden=true;hud.innerHTML='';return; }
+  const memberButtons=(event.cameraIds||[]).map((id)=>cameraById(id)).filter(Boolean).map((camera)=>`<button type="button" class="pulse-event-camera" data-event-camera="${escapeHtml(camera.id)}">${escapeHtml(camera.label)}</button>`).join('');
+  hud.hidden=false;
+  hud.innerHTML=`<div class="pulse-event-hud-head"><div><p class="eyebrow">Active area</p><strong>${escapeHtml(event.title)}</strong><span>${event.cameraCount} cameras · ${escapeHtml(event.confidence)} confidence · ${pulseTime(event.lastObservedAt)}</span></div><button type="button" class="pulse-event-clear" data-clear-pulse-event aria-label="Clear active area">×</button></div><p>${escapeHtml(event.detail)}</p><div class="pulse-event-members">${memberButtons}</div><small>Correlated visual observations only. Open a camera for its evidence and time machine.</small>`;
+  hud.querySelectorAll('[data-event-camera]').forEach((button)=>button.addEventListener('click',()=>openFocus(button.dataset.eventCamera)));
+  hud.querySelector('[data-clear-pulse-event]')?.addEventListener('click',clearPulseEvent);
+}
+function focusPulseEvent(event=pulseEventById(activePulseEventId)) {
+  if (!map||!event) return;
+  const members=pulseEventCameras(event);
+  if (members.length===1) {
+    map.flyTo({center:[members[0].lng,members[0].lat],zoom:14});
+    return;
+  }
+  if (members.length>1) {
+    const bounds=new maplibregl.LngLatBounds();
+    members.forEach((camera)=>bounds.extend([camera.lng,camera.lat]));
+    map.fitBounds(bounds,{padding:matchMedia('(max-width:640px)').matches?54:96,maxZoom:14});
+    return;
+  }
+  if (event.center) map.flyTo({center:[event.center.lng,event.center.lat],zoom:13});
+}
+async function openPulseEvent(id) {
+  const event=pulseEventById(id);if(!event)return;
+  activePulseEventId=id;
+  renderPulse();
+  setView('map');
+  await ensureMap();
+  renderMapMarkers();
+  focusPulseEvent(event);
+}
+function clearPulseEvent() {
+  activePulseEventId=null;
+  renderPulse();
+  if (view==='map') { renderMapMarkers();fitMap(); }
+}
 function pulseTime(value) {
   const minutes=Math.max(0,Math.round((Date.now()-value)/60000));
   return minutes<1?'just now':minutes===1?'1 min ago':`${minutes} min ago`;
@@ -531,7 +616,10 @@ function renderPulse() {
     return;
   }
   const items=(pulse.items||[]).filter((item)=>pulseCamera(item)).slice(0,6);
-  const events=(pulse.events||[]).slice(0,4).map((event)=>`<div class="phase2-event" data-severity="${escapeHtml(event.severity)}"><strong>${escapeHtml(event.title)}</strong><span>${escapeHtml(event.detail)} · ${escapeHtml(event.confidence)} confidence</span></div>`).join('');
+  const events=(pulse.events||[]).slice(0,6).map((event)=>{
+    const active=event.id===activePulseEventId;
+    return `<button type="button" class="phase2-event ${active?'active':''}" data-pulse-event="${escapeHtml(event.id)}" data-severity="${escapeHtml(event.severity)}" aria-pressed="${active}"><span class="phase2-event-copy"><strong>${escapeHtml(event.title)}</strong><span>${event.cameraCount} cameras · ${pulseTime(event.lastObservedAt)} · ${escapeHtml(event.confidence)} confidence</span></span><span class="phase2-event-action">Map area →</span></button>`;
+  }).join('');
   const cards=items.map((item,index)=>{
     const camera=pulseCamera(item);
     const headline=item.display?.headline||item.reason||'Visual change';
@@ -540,8 +628,9 @@ function renderPulse() {
     const confidence=confidenceLabel(item.confidence);
     return `<button class="pulse-card" data-pulse-camera="${escapeHtml(item.cameraId)}" data-observation-state="${escapeHtml(item.state||'changing')}" data-observation-severity="${escapeHtml(item.severity||'low')}"><span class="pulse-rank">#${index+1}</span><span class="pulse-thumb"><img src="${imageUrl(camera,480,true)}" alt="" width="160" height="90" loading="lazy"></span><span class="pulse-copy"><strong>${escapeHtml(camera.label)}</strong><small title="${escapeHtml(detail)}">${escapeHtml(headline)} · ${pulseTime(item.capturedAt)}${escapeHtml(persistence)}${confidence?` <span class="phase2-confidence">${escapeHtml(confidence)}</span>`:''} · <span class="phase2-evidence">Open evidence →</span></small></span><span class="pulse-score" title="${escapeHtml(detail)}">${item.score}</span></button>`;
   }).join('');
-  pulseEl.innerHTML=`<div class="pulse-head"><div><p class="eyebrow">Seattle Pulse</p><div class="pulse-title"><strong>${escapeHtml(pulse.state)}</strong><span>${pulse.pulseScore}/100</span></div></div><div class="pulse-meta"><span>${pulse.activeCameras} active cameras</span><span>${pulse.camerasAnalyzed} analyzed</span><button id="pulse-refresh" class="chip">Refresh</button></div></div>${events?`<div class="phase2-events" aria-label="Correlated areas">${events}</div>`:''}<div class="pulse-rail">${cards||'<div class="pulse-empty">History is still warming up.</div>'}</div><p class="pulse-method">Observed visual change only — Pulse does not infer crashes, congestion, weather, incidents, or causes.</p>`;
+  pulseEl.innerHTML=`<div class="pulse-head"><div><p class="eyebrow">Seattle Pulse</p><div class="pulse-title"><strong>${escapeHtml(pulse.state)}</strong><span>${pulse.pulseScore}/100</span></div></div><div class="pulse-meta">${pulse.eventCount?`<span>${pulse.eventCount} active ${pulse.eventCount===1?'area':'areas'}</span>`:''}<span>${pulse.activeCameras} active cameras</span><span>${pulse.camerasAnalyzed} analyzed</span><button id="pulse-refresh" class="chip">Refresh</button></div></div>${events?`<div class="phase2-events" aria-label="Correlated active areas">${events}</div>`:''}<div class="pulse-rail">${cards||'<div class="pulse-empty">History is still warming up.</div>'}</div><p class="pulse-method">Observed visual change only — Pulse does not infer crashes, congestion, weather, incidents, or causes.</p>`;
   pulseEl.querySelectorAll('[data-pulse-camera]').forEach((button)=>button.addEventListener('click',()=>openFocus(button.dataset.pulseCamera)));
+  pulseEl.querySelectorAll('[data-pulse-event]').forEach((button)=>button.addEventListener('click',()=>openPulseEvent(button.dataset.pulseEvent)));
   $('#pulse-refresh')?.addEventListener('click',()=>loadPulse(true));
 }
 async function loadPulse(force=false) {
@@ -554,6 +643,7 @@ async function loadPulse(force=false) {
     const next=await response.json();
     if(!Array.isArray(next.items))throw new Error('Unexpected Pulse payload');
     pulse=next;
+    if (activePulseEventId && !pulseEventById(activePulseEventId)) activePulseEventId=null;
     const observationIndex=Array.isArray(next.observationIndex)?next.observationIndex:next.items;
     pulseByCamera=new Map(observationIndex.map((item)=>[item.cameraId,item]));
     renderPulse();
@@ -641,10 +731,25 @@ setInterval(()=>{
   else { renderCollections(); updateCounts(); }
 },30000);
 
-loadStyle('/evidence.css');
 hydrateUrl();
 $('#match-all').classList.toggle('active',collectionMode==='all');
 $('#match-any').classList.toggle('active',collectionMode==='any');
-refilter();setView(view);renderDiagnostics();renderPulse();
-queueMicrotask(()=>loadPulse(false));
-if (focusedId) queueMicrotask(()=>openFocus(focusedId));
+const hydratedViewport = hydrateServerGrid();
+if (!hydratedViewport && catalogReady) refilter();
+setView(view);
+const hydratePulse = () => loadPulse(false);
+const hydrateCatalog = async () => {
+  if (!catalogReady) await loadCameras(false);
+  if ('requestIdleCallback' in window) requestIdleCallback(hydratePulse,{timeout:2200});
+  else setTimeout(hydratePulse,700);
+  if (focusedId) openFocus(focusedId);
+};
+if (catalogReady) {
+  if ('requestIdleCallback' in window) requestIdleCallback(hydratePulse,{timeout:2200});
+  else setTimeout(hydratePulse,700);
+  if (focusedId) queueMicrotask(()=>openFocus(focusedId));
+} else if ('requestIdleCallback' in window) {
+  requestIdleCallback(()=>hydrateCatalog(),{timeout:900});
+} else {
+  setTimeout(()=>hydrateCatalog(),500);
+}

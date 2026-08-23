@@ -182,13 +182,11 @@ async function getSdotCameras(): Promise<Camera[]> {
 }
 
 function card(camera: Camera, index: number): string {
-  const img = `/api/image?path=${encodeURIComponent(camera.imagePath)}`;
-  return `<article class="camera-card" data-camera-id="${esc(camera.id)}">
-    <button class="camera-open" data-camera="${esc(camera.id)}" aria-label="View ${esc(camera.label)}">
-      <div class="image-shell"><img src="${img}" alt="${esc(camera.label)}" width="480" height="270" ${index === 0 ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async"></div>
-      <div class="card-copy"><h2>${esc(camera.label)}</h2><span>${camera.videoUrl ? 'Live' : 'Snapshot'}</span></div>
-    </button>
-  </article>`;
+  const img = `/api/image?path=${encodeURIComponent(camera.imagePath)}&w=480`;
+  const liveControl = camera.videoUrl
+    ? `<button class="grid-play" type="button" data-grid-play="${esc(camera.id)}" aria-label="Play live video for ${esc(camera.label)}"><span class="play-icon">▶</span><span class="play-label">Play live</span></button>`
+    : '';
+  return `<article class="camera-card" data-camera-id="${esc(camera.id)}"><div class="image-shell"><button class="camera-image-open" type="button" data-camera="${esc(camera.id)}" aria-label="View ${esc(camera.label)}"><img src="${img}" alt="${esc(camera.label)}" width="480" height="270" ${index === 0 ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async"></button>${liveControl}<span class="live-badge" hidden>LIVE</span></div><button class="camera-open" type="button" data-camera="${esc(camera.id)}" aria-label="View ${esc(camera.label)}"><div class="card-copy"><h2>${esc(camera.label)}</h2><span>${camera.videoUrl ? 'Live' : 'Snapshot'}</span></div></button></article>`;
 }
 
 const INITIAL_COLLECTIONS: Array<[string, string]> = [
@@ -208,16 +206,19 @@ function initialCollectionCount(cameras: Camera[], id: string): number {
 }
 
 function initialCollectionButtons(cameras: Camera[]): string {
-  return INITIAL_COLLECTIONS.flatMap(([id, label]) => {
+  const chips = INITIAL_COLLECTIONS.flatMap(([id, label]) => {
     const count = initialCollectionCount(cameras, id);
     if (!count && !['live', 'recent', 'issues'].includes(id)) return [];
     return [`<button class="chip" data-collection="${id}" aria-pressed="false">${esc(label)} <span>${count}</span></button>`];
   }).join('');
+  return `${chips}<button class="chip live-grid-toggle" data-live-grid aria-pressed="false" title="Autoplay up to 4 visible live cameras, muted">▶ Live Grid</button>`;
 }
 
 function page(cameras: Camera[]): Response {
   const first = cameras.slice(0, 6);
-  const bootstrap = JSON.stringify(cameras).replace(/</g, '\\u003c');
+  // Keep the critical HTML small: bootstrap only the viewport cameras. The full
+  // catalog is fetched after first paint and upgrades window.__CAMERAS__ in place.
+  const bootstrap = JSON.stringify(first).replace(/</g, '\\u003c');
   const html = `<!doctype html><html lang="en"><head>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
     <meta name="theme-color" content="#020617">
@@ -250,7 +251,7 @@ function page(cameras: Camera[]): Response {
     <main id="main"><div id="grid" class="grid">${first.map(card).join('')}</div><div id="map" class="map-shell" hidden></div><div id="empty" class="empty" hidden>No cameras match the selected filters.</div><div id="sentinel" aria-hidden="true"></div></main>
     <dialog id="modal"><button id="close" class="modal-close" aria-label="Close">×</button><div id="modal-body"></div></dialog>
     <nav class="mobile-dock" aria-label="Primary navigation"><button data-mobile-view="grid" class="active">Grid</button><button data-mobile-view="map">Map</button><button id="mobile-settings">Source</button></nav>
-    <script>window.__CAMERAS__=${bootstrap};window.__DEFAULT_ARCGIS__=${JSON.stringify(DEFAULT_FEATURE_SERVICE)}</script><script type="module" src="/benchmark.js"></script>
+    <script>window.__CAMERAS__=${bootstrap};window.__CAMERA_COUNT__=${cameras.length};window.__DEFAULT_ARCGIS__=${JSON.stringify(DEFAULT_FEATURE_SERVICE)}</script><script type="module" src="/benchmark.js"></script>
   </body></html>`;
   return new Response(html, { headers: {
     'Content-Type': 'text/html; charset=utf-8',

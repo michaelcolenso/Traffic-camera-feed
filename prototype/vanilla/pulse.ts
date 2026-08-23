@@ -101,15 +101,15 @@ function historyImageUrl(key: string | null): string | null {
 
 function corridorWeight(label: string): { weight: number; corridor: string | null } {
   const value = label.toLowerCase();
-  const groups: Array<[string, string[], number]> = [
-    ['I-5', ['i-5', 'i5', 'interstate 5'], 4],
-    ['Aurora / SR-99', ['aurora', 'sr 99', 'sr99'], 4],
-    ['West Seattle', ['west seattle', 'spokane st', 'spokane street'], 4],
-    ['Major bridge', ['bridge', 'fremont', 'ballard', 'montlake', 'university bridge'], 3],
-    ['Downtown core', ['1st ave', '2nd ave', '3rd ave', '4th ave', '5th ave', '6th ave', 'pike', 'pine', 'madison', 'yesler', 'jackson'], 2],
+  const groups: Array<[string, RegExp[], number]> = [
+    ['I-5', [/\bi-?5\b/, /\binterstate 5\b/], 4],
+    ['Aurora / SR-99', [/\baurora(?: ave(?:nue)?)?\b/, /\bsr[ -]?99\b/], 4],
+    ['West Seattle', [/\bwest seattle\b/, /\bspokane (?:st|street)\b/], 4],
+    ['Major bridge', [/\bbridge\b/, /\bfremont\b/, /\bballard\b/, /\bmontlake\b/, /\buniversity bridge\b/], 3],
+    ['Downtown core', [/\b1st ave(?:nue)?\b/, /\b2nd ave(?:nue)?\b/, /\b3rd ave(?:nue)?\b/, /\b4th ave(?:nue)?\b/, /\b5th ave(?:nue)?\b/, /\b6th ave(?:nue)?\b/, /\bpike(?: st(?:reet)?)?\b/, /\bpine(?: st(?:reet)?)?\b/, /\bmadison(?: st(?:reet)?)?\b/, /\byesler(?: way)?\b/, /\bjackson(?: st(?:reet)?)?\b/], 2],
   ];
-  for (const [corridor, terms, weight] of groups) {
-    if (terms.some((term) => value.includes(term))) return { weight, corridor };
+  for (const [corridor, patterns, weight] of groups) {
+    if (patterns.some((pattern) => pattern.test(value))) return { weight, corridor };
   }
   return { weight: 0, corridor: null };
 }

@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: vanilla-architecture-benchmark-${{ github.event.pull_request.number || github.ref }}
@@ -22,15 +22,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
-          fetch-depth: 0
-      - name: Apply staged geographic Pulse patch
-        if: github.head_ref == 'shift/pulse-geographic-events' && hashFiles('scripts/apply-pulse-geographic-events.py') != ''
-        run: |
-          python scripts/apply-pulse-geographic-events.py
-          python scripts/fix-pulse-event-filter-context.py
-          python scripts/optimize-initial-hydration.py
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -155,16 +146,6 @@ jobs:
           if failures:
               print('\n'.join(failures), file=sys.stderr)
               sys.exit(1)
-      - name: Commit validated implementation
-        if: github.head_ref == 'shift/pulse-geographic-events' && hashFiles('scripts/apply-pulse-geographic-events.py') != ''
-        run: |
-          git checkout origin/main -- .github/workflows/benchmark-cloudflare-vanilla.yml
-          rm -f .github/workflows/apply-pulse-geographic-events.yml scripts/apply-pulse-geographic-events.py scripts/fix-pulse-event-filter-context.py scripts/optimize-initial-hydration.py
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git add prototype/vanilla/worker.ts prototype/vanilla/public/benchmark.js prototype/vanilla/public/evidence.css prototype/vanilla/pulse.ts tests/vanilla-parity.mjs .github/workflows/benchmark-cloudflare-vanilla.yml .github/workflows/apply-pulse-geographic-events.yml scripts/apply-pulse-geographic-events.py scripts/fix-pulse-event-filter-context.py scripts/optimize-initial-hydration.py
-          git commit -m 'feat: make Seattle Pulse geographic'
-          git push origin HEAD:${{ github.head_ref }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
