@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: vanilla-architecture-benchmark-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   benchmark:
@@ -27,7 +27,9 @@ jobs:
           fetch-depth: 0
       - name: Apply staged geographic Pulse patch
         if: github.head_ref == 'shift/pulse-geographic-events' && hashFiles('scripts/apply-pulse-geographic-events.py') != ''
-        run: python scripts/apply-pulse-geographic-events.py
+        run: |
+          python scripts/apply-pulse-geographic-events.py
+          python scripts/fix-pulse-event-filter-context.py
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -156,10 +158,10 @@ jobs:
         if: github.head_ref == 'shift/pulse-geographic-events' && hashFiles('scripts/apply-pulse-geographic-events.py') != ''
         run: |
           git checkout origin/main -- .github/workflows/benchmark-cloudflare-vanilla.yml
-          rm -f .github/workflows/apply-pulse-geographic-events.yml scripts/apply-pulse-geographic-events.py
+          rm -f .github/workflows/apply-pulse-geographic-events.yml scripts/apply-pulse-geographic-events.py scripts/fix-pulse-event-filter-context.py
           git config user.name github-actions
           git config user.email github-actions@github.com
-          git add prototype/vanilla/public/benchmark.js prototype/vanilla/public/evidence.css prototype/vanilla/pulse.ts tests/vanilla-parity.mjs .github/workflows/benchmark-cloudflare-vanilla.yml .github/workflows/apply-pulse-geographic-events.yml scripts/apply-pulse-geographic-events.py
+          git add prototype/vanilla/public/benchmark.js prototype/vanilla/public/evidence.css prototype/vanilla/pulse.ts tests/vanilla-parity.mjs .github/workflows/benchmark-cloudflare-vanilla.yml .github/workflows/apply-pulse-geographic-events.yml scripts/apply-pulse-geographic-events.py scripts/fix-pulse-event-filter-context.py
           git commit -m 'feat: make Seattle Pulse geographic'
           git push origin HEAD:${{ github.head_ref }}
       - uses: actions/upload-artifact@v4
