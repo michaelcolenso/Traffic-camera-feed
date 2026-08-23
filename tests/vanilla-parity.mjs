@@ -95,6 +95,51 @@ try {
   check(Boolean(nextFocused) && nextFocused !== firstFocused, 'next-camera navigation did not update focus URL state');
   await page.locator('#close').click();
 
+  const eventCameras = bootstrap.filter((camera) => Number.isFinite(camera.lat) && Number.isFinite(camera.lng)).slice(0, 2);
+  if (eventCameras.length === 2) {
+    const now = Date.now();
+    await page.route('**/api/pulse**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          generatedAt: now,
+          windowMinutes: 60,
+          pulseScore: 64,
+          state: 'active',
+          activeCameras: 2,
+          camerasAnalyzed: bootstrap.length,
+          observationCount: 2,
+          eventCount: 1,
+          methodology: 'test fixture',
+          observationIndex: eventCameras.map((camera, index) => ({ cameraId: camera.id, capturedAt: now - index * 60000, score: 70 - index, reason: 'Test visual change', state: 'changing', severity: 'moderate', confidence: 'high', display: { headline: 'Test visual change', detail: 'Parity fixture' } })),
+          events: [{ id: 'parity-active-area', title: 'Parity active area', cameraIds: eventCameras.map((camera) => camera.id), cameraCount: 2, firstObservedAt: now - 120000, lastObservedAt: now, severity: 'moderate', confidence: 'high', center: { lat: (eventCameras[0].lat + eventCameras[1].lat) / 2, lng: (eventCameras[0].lng + eventCameras[1].lng) / 2 }, detail: '2 nearby cameras changed within 10 minutes' }],
+          items: [],
+        }),
+      });
+    });
+    if (await page.locator('#pulse-refresh').count()) await page.locator('#pulse-refresh').click();
+    else await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForTimeout(120);
+    const activeArea = page.locator('[data-pulse-event="parity-active-area"]');
+    check(await activeArea.count() === 1, 'Pulse active-area control missing');
+    await activeArea.click();
+    await page.waitForTimeout(900);
+    check(new URL(page.url()).searchParams.get('view') === 'map', 'Pulse active area did not switch to map view');
+    check(await page.locator('#pulse-event-hud').isVisible(), 'Pulse active-area map HUD missing');
+    check(await page.locator('.camera-marker.event-active').count() === 2, 'Pulse event member cameras were not highlighted');
+    check(await page.locator('#pulse-event-hud [data-event-camera]').count() === 2, 'Pulse active-area member controls missing');
+    await page.locator('#pulse-event-hud [data-event-camera]').first().click();
+    check(await page.locator('#modal[open]').count() === 1, 'Pulse active-area camera did not open evidence focus');
+    await page.locator('#close').click();
+    await page.locator('[data-clear-pulse-event]').click();
+    check(!(await page.locator('#pulse-event-hud').isVisible()), 'Pulse active area did not clear');
+    await page.unroute('**/api/pulse**');
+    await page.locator('[data-mobile-view="grid"]').click();
+  } else {
+    failures.push('not enough geocoded cameras for Pulse event map test');
+  }
+
   await page.locator('[data-mobile-view="map"]').click();
   check(new URL(page.url()).searchParams.get('view') === 'map', 'map URL state missing');
   check(await page.locator('#map').isVisible(), 'map shell missing');

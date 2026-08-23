@@ -30,3 +30,15 @@
   .phase2-event{max-width:17rem}
   .pulse-meta{gap:.35rem}
 }
+
+
+/* Geographic Seattle Pulse active areas. */
+.phase2-event{appearance:none;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:.8rem;cursor:pointer;font:inherit;transition:border-color .16s ease,background .16s ease,transform .16s ease}
+.phase2-event:hover,.phase2-event:focus-visible{border-color:rgba(103,232,249,.58);background:rgba(8,47,73,.38);outline:none;transform:translateY(-1px)}
+.phase2-event.active{border-color:rgba(103,232,249,.78);background:rgba(8,145,178,.2);box-shadow:inset 0 0 0 1px rgba(103,232,249,.18)}
+.phase2-event-copy{min-width:0}.phase2-event-copy strong,.phase2-event-copy span{display:block}.phase2-event-action{flex:0 0 auto;color:#67e8f9;font-size:.64rem;font-weight:700;white-space:nowrap}
+.camera-marker.event-active{width:1.35rem;height:1.35rem;border-width:3px;border-color:#cffafe;box-shadow:0 0 0 5px rgba(34,211,238,.22),0 0 22px rgba(34,211,238,.82)}
+.camera-marker.event-muted{opacity:.22;box-shadow:none;transform:scale(.78)}
+.pulse-event-hud{position:absolute;z-index:5;left:1rem;bottom:1rem;width:min(28rem,calc(100% - 2rem));max-height:min(44vh,25rem);overflow:auto;padding:.8rem;border:1px solid rgba(103,232,249,.34);border-radius:.9rem;background:rgba(2,6,23,.92);backdrop-filter:blur(16px);box-shadow:0 18px 45px rgba(0,0,0,.45)}
+.pulse-event-hud[hidden]{display:none}.pulse-event-hud-head{display:flex;align-items:flex-start;justify-content:space-between;gap:.7rem}.pulse-event-hud-head strong{display:block;color:#ecfeff;font-size:.86rem;margin:.18rem 0}.pulse-event-hud-head span,.pulse-event-hud>p,.pulse-event-hud>small{display:block;color:#94a3b8;font-size:.66rem;line-height:1.45}.pulse-event-hud>p{margin:.65rem 0}.pulse-event-clear{flex:0 0 auto;width:2rem;height:2rem;border:1px solid rgba(148,163,184,.24);border-radius:999px;background:rgba(15,23,42,.8);color:#cbd5e1;cursor:pointer}.pulse-event-members{display:flex;flex-wrap:wrap;gap:.35rem;margin:.6rem 0}.pulse-event-camera{border:1px solid rgba(103,232,249,.2);border-radius:.55rem;background:rgba(8,47,73,.28);color:#cffafe;padding:.4rem .5rem;font-size:.64rem;cursor:pointer}.pulse-event-camera:hover,.pulse-event-camera:focus-visible{border-color:rgba(103,232,249,.6);outline:none}
+@media(max-width:640px){.phase2-event{max-width:19rem}.pulse-event-hud{left:.5rem;bottom:.5rem;width:calc(100% - 1rem);max-height:42vh}.pulse-event-members{flex-wrap:nowrap;overflow-x:auto}.pulse-event-camera{flex:0 0 auto;max-width:15rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
