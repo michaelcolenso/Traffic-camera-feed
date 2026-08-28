@@ -165,7 +165,17 @@ const LEAD_AGE = 1;            // how old the lead frame itself is
 const QUEUE_MINUTES = 11;      // how long the queue has stood, as of that frame
 const QUEUE_WORD = 'Eleven';
 const queueStart = clockAt(LEAD_AGE + QUEUE_MINUTES).slice(0, 5);
-const leadIndex = Math.max(0, CAMERAS.findIndex((c) => /Aurora/.test(c.l)));
+// The lede describes a northbound queue between N 85th and N 105th, so the lead
+// frame has to be an Aurora camera pointed north-south inside that stretch. An
+// EW camera looks across the highway rather than along it, and would show no queue.
+const isAurora = (c) => /Aurora/i.test(c.l);
+const isNorthSouth = (c) => /_NS\.jpg$/i.test(c.p);
+const inCorridor = (c) => /\bN (?:8[5-9]|9\d|10[0-5])th\b/.test(c.l);
+const leadIndex = Math.max(0, [
+  CAMERAS.findIndex((c) => isAurora(c) && isNorthSouth(c) && inCorridor(c)),
+  CAMERAS.findIndex((c) => isAurora(c) && isNorthSouth(c)),
+  CAMERAS.findIndex(isAurora),
+].find((i) => i >= 0) ?? 0);
 const lead = pickCameras(CAMERAS.length)[leadIndex];
 const rest = pickCameras(CAMERAS.length).filter((_, i) => i !== leadIndex).slice(0, 9);
 document.getElementById('stamp').textContent = 'All frames ' + clockAt(LEAD_AGE) + ' ' + zoneLabel();

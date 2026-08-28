@@ -9,14 +9,26 @@ which covers task clarity and accessibility and still stands.
 
 ## The headline finding
 
-**172 of the 175 color declarations in the stylesheet are unedited Tailwind
-default values.** Only three are not: `#0d2840` and `#06111f` are the inner
-stops of the body glow, and `rgba(10,18,32,.82)` is the bottom stop of the
-`.camera-card` gradient. Every other value in the file came out of the box.
+**Not one hue in this interface was chosen.** Every RGB value in the stylesheet
+traces to Tailwind's default palette:
 
-The census counts every color literal in `benchmark.css` and `evidence.css` —
-71 six-digit hex, 5 shorthand hex (`#fff` ×3, `#000` ×2), and 99 `rgb()`/`rgba()`
-declarations — so the number is reproducible from the two files.
+| Form | Count | Tailwind |
+| --- | ---: | ---: |
+| Bare hex (`#67e8f9`, `#fff`) | 76 | 74 verbatim |
+| `rgb()` / `rgba()` | 99 | 98 by RGB triple |
+| **All color declarations** | **175** | **172** |
+
+Only three RGB triples in the whole file are not Tailwind's: `#0d2840` and
+`#06111f`, the inner stops of the body glow, and `rgba(10,18,32,.82)`, the bottom
+stop of the `.camera-card` gradient — and all three are darker mixes of the same
+slate ramp.
+
+The distinction matters. The bare hex values are Tailwind entries verbatim. The
+`rgba()` ones wrap a Tailwind triple in an alpha chosen here, so the *channels*
+are inherited and only the *transparency* was decided locally — across **36
+distinct alpha values**, which is the same missing-token pattern as the twelve
+radii below. The census counts every color literal in `benchmark.css` and
+`evidence.css`, so both numbers are reproducible from the two files.
 
 The stylesheet does not use Tailwind. The palette was copied out of it:
 
@@ -39,9 +51,10 @@ Ordered by how loudly each announces itself.
 
 ### Color
 
-1. **The palette is Tailwind's, unedited.** See above. Even the three custom
-   values are only darker mixes of the same slate ramp, chosen to sit under it
-   rather than to depart from it.
+1. **The palette is Tailwind's.** See above. Even the three custom values are
+   darker mixes of the same slate ramp, chosen to sit under it rather than to
+   depart from it. The only color decision anyone made in this file was how
+   transparent to render an inherited hue — 36 times, each a fresh guess.
 2. **One accent does every job.** `#67e8f9` appears 42 times: eyebrow, active
    chip, LIVE text, focus ring, map marker, compare divider, score pill, play
    hover, map HUD, nearby link, event badge, dock active state. When one hue
