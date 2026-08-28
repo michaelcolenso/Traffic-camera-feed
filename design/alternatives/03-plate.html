@@ -176,9 +176,14 @@ const leadIndex = Math.max(0, [
   CAMERAS.findIndex((c) => isAurora(c) && isNorthSouth(c)),
   CAMERAS.findIndex(isAurora),
 ].find((i) => i >= 0) ?? 0);
+// SDOT cameras refresh independently, so the plates carry different ages. The
+// heading has to describe that spread rather than claim a single capture time.
+const plateAge = (i) => i % 3;
 const lead = pickCameras(CAMERAS.length)[leadIndex];
 const rest = pickCameras(CAMERAS.length).filter((_, i) => i !== leadIndex).slice(0, 9);
-document.getElementById('stamp').textContent = 'All frames ' + clockAt(LEAD_AGE) + ' ' + zoneLabel();
+const frameAges = [LEAD_AGE, ...rest.map((_, i) => plateAge(i))];
+document.getElementById('stamp').textContent =
+  `Frames ${clockAt(Math.max(...frameAges)).slice(0, 5)}\u2013${clockAt(Math.min(...frameAges)).slice(0, 5)} ${zoneLabel()}`;
 document.getElementById('lede').innerHTML = `
   <div class="frame"><img src="${lead.img}" alt=""></div>
   <div class="cap">
@@ -193,7 +198,7 @@ document.getElementById('plates').innerHTML = rest.map((c, i) => `
     <div class="frame"><img src="${c.img}" alt=""></div>
     <figcaption>
       <h4>${c.label}</h4>
-      <p class="note">${clockAt(i % 3)} · ${c.live ? '<em>live feed</em>' : 'still only'}</p>
+      <p class="note">${clockAt(plateAge(i))} · ${c.live ? '<em>live feed</em>' : 'still only'}</p>
     </figcaption>
   </figure>`).join('');
 </script>
