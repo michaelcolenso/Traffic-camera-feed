@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Direction 1 — Signal</title>
+<link rel="stylesheet" href="/fonts.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Narrow:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#f2efe9; --ink:#191b1f; --rule:#cfc9bb; --rule-soft:#e2ddd2;
+  --muted:#6b6660; --amber:#c26a00; --alert:#a8271b;
+  --sans:'Archivo',system-ui,sans-serif; --narrow:'Archivo Narrow','Archivo',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.4;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1360px;margin:0 auto;padding:0 32px}
+
+/* Masthead: one heavy rule does the work a drop shadow used to do. */
+.masthead{display:flex;align-items:flex-end;justify-content:space-between;gap:32px;padding:26px 0 14px;border-bottom:4px solid var(--ink)}
+.wordmark{font-family:var(--narrow);font-weight:700;font-size:38px;line-height:.92;letter-spacing:-.01em;text-transform:uppercase;margin:0}
+.wordmark span{display:block;font-family:var(--sans);font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:none;color:var(--muted);margin-top:7px}
+.tally{display:flex;gap:34px;text-align:right}
+.tally div{min-width:74px}
+.tally b{display:block;font-family:var(--narrow);font-weight:700;font-size:34px;line-height:1;font-variant-numeric:tabular-nums}
+.tally small{display:block;font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-top:5px}
+.tally .warn b{color:var(--alert)}
+
+/* Filters read as a table of contents, not as capsules. */
+.filters{display:flex;align-items:center;gap:28px;padding:13px 0;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+.filters button{appearance:none;flex:0 0 auto;border:0;background:none;padding:4px 0;font:inherit;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent}
+.filters button b{font-family:var(--mono);font-weight:500;font-size:11px;margin-left:6px;color:#9a948b}
+.filters button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--amber)}
+.filters button.on b{color:var(--amber)}
+.search{margin-left:auto;position:relative}
+.search input{appearance:none;width:270px;border:0;border-bottom:1px solid var(--ink);background:none;font:inherit;font-size:13px;padding:5px 0 5px 20px;color:var(--ink)}
+.search input::placeholder{color:#9a948b}
+.search svg{position:absolute;left:0;top:7px;width:13px;height:13px;stroke:var(--muted);fill:none;stroke-width:1.6}
+
+/* Standing advisory replaces the decorative "Pulse" banner. */
+.advisory{display:flex;gap:18px;align-items:baseline;padding:16px 0 15px;border-bottom:1px solid var(--rule)}
+.advisory .flag{flex:0 0 auto;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#fff;background:var(--amber);padding:4px 7px}
+.advisory p{margin:0;font-size:15px;max-width:74ch}
+.advisory p b{font-weight:600}
+.advisory time{margin-left:auto;flex:0 0 auto;font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:26px 22px;padding:26px 0 60px}
+.plate figure{margin:0}
+.plate .frame{position:relative;aspect-ratio:16/9;border:1px solid var(--ink);background:#ddd8cc;overflow:hidden}
+.plate img{display:block;width:100%;height:100%;object-fit:cover}
+.plate .idx{position:absolute;left:0;top:0;font-family:var(--mono);font-size:10px;padding:3px 5px;background:var(--ink);color:var(--paper);font-variant-numeric:tabular-nums}
+.plate figcaption{display:flex;align-items:baseline;gap:10px;padding:8px 1px 9px;border-bottom:1px solid var(--rule-soft)}
+.plate h2{margin:0;font-size:14px;font-weight:600;letter-spacing:-.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plate .state{margin-left:auto;flex:0 0 auto;display:flex;align-items:center;gap:5px;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.plate .state i{width:6px;height:6px;background:var(--muted);display:block}
+.plate .state.live{color:var(--amber)}
+.plate .state.live i{background:var(--amber)}
+.plate .geo{font-family:var(--mono);font-size:10px;color:#9a948b;padding-top:6px;display:block}
+@media(max-width:1100px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:760px){
+  .wrap{padding:0 14px}
+  .masthead{padding:14px 0 9px;border-bottom-width:3px;align-items:center}
+  .wordmark{font-size:21px}
+  .wordmark span{display:none}
+  .tally{gap:16px}
+  .tally div{min-width:0}
+  .tally b{font-size:20px}
+  .tally small{font-size:8px;letter-spacing:.07em;margin-top:2px}
+  /* Filters scroll on one line instead of stacking the fold away. */
+  .filters{gap:18px;padding:8px 0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .filters::-webkit-scrollbar{display:none}
+  .search{display:none}
+  /* The advisory keeps its first sentence and drops the detail. */
+  .advisory{padding:10px 0 9px;gap:10px}
+  .advisory p{font-size:13.5px}
+  .advisory p b{display:block}
+  .advisory p .detail,.advisory time{display:none}
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 12px;padding:14px 0 50px}
+  .plate h2{font-size:12.5px}
+  .plate .geo{display:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <h1 class="wordmark">Seattle Traffic Cameras<span>Seattle Department of Transportation · public snapshot feed</span></h1>
+    <div class="tally">
+      <div><b>387</b><small>Cameras</small></div>
+      <div><b>381</b><small>Live</small></div>
+      <div class="warn"><b>6</b><small>Down</small></div>
+    </div>
+  </header>
+
+  <nav class="filters">
+    <button class="on">All<b>387</b></button>
+    <button>Downtown<b>98</b></button>
+    <button>Bridges<b>24</b></button>
+    <button>I-5<b>41</b></button>
+    <button>Aurora / 99<b>20</b></button>
+    <button>Out of service<b>6</b></button>
+    <label class="search">
+      <svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="5"/><path d="M11 11l4 4"/></svg>
+      <input placeholder="Intersection or corridor">
+    </label>
+  </nav>
+
+  <div class="advisory">
+    <span class="flag">Advisory</span>
+    <p><b>Aurora Ave N northbound is queueing between N 85th and N 105th.</b> <span class="detail">Three cameras have shown stopped traffic in the same lanes for eleven minutes.</span></p>
+    <time id="adv-time"></time>
+  </div>
+
+  <main class="grid" id="grid"></main>
+</div>
+
+<script type="module">
+import { loadCameras, clockAt } from './_data.js';
+document.getElementById('adv-time').textContent = 'as of ' + clockAt(2);
+const cams = await loadCameras(12);
+document.getElementById('grid').innerHTML = cams.map((c, i) => `
+  <article class="plate"><figure>
+    <div class="frame"><span class="idx">${String(i + 1).padStart(2, '0')}</span><img src="${c.img}" alt=""></div>
+    <figcaption>
+      <h2>${c.label}</h2>
+      <span class="state ${c.live ? 'live' : ''}"><i></i>${c.live ? 'Live' : 'Still'}</span>
+    </figcaption>
+    <span class="geo">${c.lat ? c.lat.toFixed(4) + ', ' + c.lng.toFixed(4) : '—'} · updated ${clockAt(i % 4)}</span>
+  </figure></article>`).join('');
+</script>
+</body>
+</html>

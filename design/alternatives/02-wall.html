@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Direction 2 — Wall</title>
+<link rel="stylesheet" href="/fonts.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --ground:#0a0a0b; --tile:#141416; --edge:#242427;
+  --text:#d8d8da; --muted:#78787e; --dim:#4e4e54; --rec:#e0453a;
+  --cond:'IBM Plex Sans Condensed',system-ui,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--text);font-family:var(--cond);font-size:14px;-webkit-font-smoothing:antialiased}
+
+/* One 44px bar carries identity, state, search and view. No blur, no glow. */
+.bar{display:flex;align-items:center;gap:20px;height:44px;padding:0 12px;border-bottom:1px solid var(--edge);background:var(--ground)}
+.mark{font-weight:700;font-size:13px;letter-spacing:.13em;text-transform:uppercase;white-space:nowrap}
+.mark em{font-style:normal;color:var(--dim)}
+.readout{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.02em;white-space:nowrap;font-variant-numeric:tabular-nums}
+.readout b{color:var(--text);font-weight:500}
+.readout i{display:inline-block;width:6px;height:6px;background:var(--rec);border-radius:50%;font-style:normal;margin-right:5px;vertical-align:1px}
+.bar input{appearance:none;margin-left:auto;width:230px;height:26px;border:1px solid var(--edge);background:#111113;color:var(--text);font:inherit;font-size:12px;padding:0 8px}
+.bar input::placeholder{color:var(--dim)}
+.bar input:focus{outline:none;border-color:#3d3d43}
+.views{display:flex;gap:2px}
+.views button{appearance:none;border:0;background:none;color:var(--muted);font:inherit;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:5px 8px;cursor:pointer;border-bottom:2px solid transparent}
+.views button.on{color:var(--text);border-bottom-color:var(--text)}
+
+/* Filters as a mono status line, the way a console prints its state. */
+.strip{display:flex;align-items:center;gap:0;height:30px;padding:0 12px;border-bottom:1px solid var(--edge);font-family:var(--mono);font-size:11px;overflow-x:auto;white-space:nowrap}
+.strip button{appearance:none;border:0;background:none;font:inherit;color:var(--muted);cursor:pointer;padding:0 10px;border-right:1px solid var(--edge)}
+.strip button:first-child{padding-left:0}
+.strip button.on{color:#fff}
+.strip button span{color:var(--dim)}
+.strip .note{margin-left:auto;padding-left:16px;color:var(--dim)}
+
+/* The mosaic: full bleed, 2px gutters, no radius, no shadow, no card chrome. */
+.wall{display:grid;grid-template-columns:repeat(auto-fill,minmax(236px,1fr));gap:2px;padding:2px}
+.cell{position:relative;aspect-ratio:16/9;background:var(--tile);overflow:hidden;cursor:pointer}
+.cell img{display:block;width:100%;height:100%;object-fit:cover}
+.cell:hover{outline:1px solid #fff;outline-offset:-1px}
+/* Label burns into the frame like camera OSD instead of taking a caption row. */
+.osd{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:7px;padding:5px 7px;background:linear-gradient(transparent,rgba(0,0,0,.82) 55%)}
+.osd .dot{flex:0 0 auto;width:6px;height:6px;border-radius:50%;background:var(--rec)}
+.osd .dot.off{background:var(--dim)}
+.osd .name{font-size:12px;font-weight:500;letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,.9)}
+.osd .t{margin-left:auto;flex:0 0 auto;font-family:var(--mono);font-size:10px;color:#b4b4b8;font-variant-numeric:tabular-nums;text-shadow:0 1px 2px rgba(0,0,0,.9)}
+.cell .ch{position:absolute;left:6px;top:5px;font-family:var(--mono);font-size:10px;color:#c8c8cc;text-shadow:0 1px 2px rgba(0,0,0,.9);font-variant-numeric:tabular-nums}
+@media(max-width:700px){.wall{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}.bar input{width:120px}.mark em{display:none}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <span class="mark">SDOT <em>/</em> Camera Wall</span>
+  <span class="readout"><i></i><b>381</b> live &nbsp;·&nbsp; 6 down &nbsp;·&nbsp; 387 total &nbsp;·&nbsp; <b id="clk"></b> PDT</span>
+  <input placeholder="Filter cameras">
+  <div class="views"><button class="on">Wall</button><button>Map</button><button>List</button></div>
+</header>
+<nav class="strip">
+  <button class="on">ALL <span>387</span></button>
+  <button>DOWNTOWN <span>98</span></button>
+  <button>BRIDGES <span>24</span></button>
+  <button>I-5 <span>41</span></button>
+  <button>SR-99 <span>20</span></button>
+  <button>CHANGED <span>11</span></button>
+  <button>DOWN <span>6</span></button>
+  <span class="note">refresh 60s · click a tile for full frame</span>
+</nav>
+<main class="wall" id="wall"></main>
+
+<script type="module">
+import { loadCameras, clockAt } from './_data.js';
+document.getElementById('clk').textContent = clockAt(0);
+const cams = await loadCameras(48);
+document.getElementById('wall').innerHTML = cams.map((c, i) => `
+  <div class="cell">
+    <img src="${c.img}" alt="">
+    <span class="ch">CH ${String(i + 1).padStart(3, '0')}</span>
+    <div class="osd">
+      <span class="dot ${c.live ? '' : 'off'}"></span>
+      <span class="name">${c.label}</span>
+      <span class="t">${clockAt(i % 3)}</span>
+    </div>
+  </div>`).join('');
+</script>
+</body>
+</html>

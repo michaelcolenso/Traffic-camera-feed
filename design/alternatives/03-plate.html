@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Direction 3 — Plate</title>
+<link rel="stylesheet" href="/fonts.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,300&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#171614; --mat:#211f1c; --rule:#302d29;
+  --text:#e9e4db; --muted:#918a7e; --bone:#d8cab2;
+  --serif:'Newsreader',Georgia,serif; --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--text);font-family:var(--serif);font-size:17px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.shell{display:grid;grid-template-columns:232px minmax(0,1fr);gap:56px;max-width:1400px;margin:0 auto;padding:48px 44px 90px}
+
+/* Left rail: an index, not a toolbar. */
+.rail{position:sticky;top:48px;align-self:start}
+.rail h1{margin:0 0 4px;font-weight:300;font-size:30px;line-height:1.08;letter-spacing:-.01em}
+.rail h1 em{display:block;font-style:italic;color:var(--bone)}
+.rail .sub{margin:0 0 30px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);line-height:1.7}
+.rail nav{border-top:1px solid var(--rule)}
+.rail nav button{display:flex;justify-content:space-between;align-items:baseline;width:100%;appearance:none;border:0;border-bottom:1px solid var(--rule);background:none;font:inherit;font-size:16px;color:var(--muted);text-align:left;padding:9px 0;cursor:pointer}
+.rail nav button span{font-family:var(--mono);font-size:10px;color:#615c54}
+.rail nav button.on{color:var(--text)}
+.rail nav button.on span{color:var(--bone)}
+.rail .find{margin-top:22px}
+.rail .find input{width:100%;appearance:none;border:0;border-bottom:1px solid var(--rule);background:none;font:inherit;font-size:15px;color:var(--text);padding:6px 0}
+.rail .find input::placeholder{color:#615c54;font-style:italic}
+
+/* The lede: one big frame carries the story the chip rail used to gesture at. */
+.lede{margin:0 0 52px}
+.lede .frame{background:var(--mat);padding:9px;border:1px solid var(--rule)}
+.lede img{display:block;width:100%;aspect-ratio:21/9;object-fit:cover}
+.lede .cap{display:grid;grid-template-columns:minmax(0,1fr) 210px;gap:40px;padding-top:16px}
+.lede h2{margin:0 0 8px;font-weight:300;font-size:27px;line-height:1.22;letter-spacing:-.012em}
+.lede p{margin:0;font-size:17px;color:#c6bfb3;max-width:56ch}
+.lede .meta{font-family:var(--mono);font-size:10px;line-height:1.9;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);border-left:1px solid var(--rule);padding-left:18px}
+.lede .meta b{display:block;color:var(--bone);font-weight:400}
+
+.sectionrule{display:flex;align-items:baseline;gap:14px;border-top:1px solid var(--rule);padding-top:13px;margin-bottom:26px}
+.sectionrule h3{margin:0;font-weight:400;font-size:17px;font-style:italic;color:var(--bone)}
+.sectionrule span{margin-left:auto;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+
+.plates{display:grid;grid-template-columns:repeat(3,1fr);gap:44px 34px}
+.plates figure{margin:0}
+.plates .frame{background:var(--mat);padding:7px;border:1px solid var(--rule)}
+.plates img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover}
+.plates figcaption{padding-top:11px}
+.plates h4{margin:0;font-weight:400;font-size:17px;line-height:1.3;letter-spacing:-.005em}
+.plates .note{margin:3px 0 0;font-family:var(--mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.plates .note em{font-style:normal;color:var(--bone)}
+@media(max-width:1000px){.shell{grid-template-columns:1fr;gap:34px;padding:32px 24px 70px}.rail{position:static}.plates{grid-template-columns:repeat(2,1fr)}.lede .cap{grid-template-columns:1fr}.lede .meta{border-left:0;border-top:1px solid var(--rule);padding:12px 0 0}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="rail">
+    <h1>Seattle,<em>as it stands</em></h1>
+    <p class="sub">387 public cameras<br>Refreshed every minute<br>SDOT open data</p>
+    <nav>
+      <button class="on">Everywhere <span>387</span></button>
+      <button>Downtown <span>98</span></button>
+      <button>The bridges <span>24</span></button>
+      <button>I-5 <span>41</span></button>
+      <button>Aurora <span>20</span></button>
+      <button>Dark cameras <span>6</span></button>
+    </nav>
+    <label class="find"><input placeholder="Find an intersection…"></label>
+  </aside>
+
+  <main>
+    <article class="lede" id="lede"></article>
+    <div class="sectionrule">
+      <h3>Elsewhere in the city</h3>
+      <span id="stamp"></span>
+    </div>
+    <div class="plates" id="plates"></div>
+  </main>
+</div>
+
+<script type="module">
+import { loadCameras, clockAt } from './_data.js';
+const cams = await loadCameras(10);
+const [lead, ...rest] = cams;
+document.getElementById('stamp').textContent = 'All frames ' + clockAt(1) + ' PDT';
+document.getElementById('lede').innerHTML = `
+  <div class="frame"><img src="${lead.img}" alt=""></div>
+  <div class="cap">
+    <div>
+      <h2>Eleven minutes of stopped traffic on Aurora, and nobody has said anything yet.</h2>
+      <p>Three cameras between N 85th and N 105th have shown the same northbound queue since 5:41. The pattern held through four refreshes, which is usually a collision rather than the ordinary morning slowdown.</p>
+    </div>
+    <div class="meta"><b>${lead.label}</b>Frame ${clockAt(1)} PDT<br>Live feed available<br>${lead.lat ? lead.lat.toFixed(4) + ' / ' + lead.lng.toFixed(4) : ''}</div>
+  </div>`;
+document.getElementById('plates').innerHTML = rest.map((c, i) => `
+  <figure>
+    <div class="frame"><img src="${c.img}" alt=""></div>
+    <figcaption>
+      <h4>${c.label}</h4>
+      <p class="note">${clockAt(i % 3)} · ${c.live ? '<em>live feed</em>' : 'still only'}</p>
+    </figcaption>
+  </figure>`).join('');
+</script>
+</body>
+</html>
