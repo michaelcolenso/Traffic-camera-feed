@@ -73,10 +73,79 @@ body{margin:0;background:var(--ground);color:var(--text);font-family:var(--cond)
 </nav>
 <main class="wall" id="wall"></main>
 
-<script type="module">
-import { loadCameras, clockAt } from './_data.js';
+<script>
+// Self-contained on purpose: opened from the filesystem, a browser refuses both
+// module imports and fetch() from the opaque file:// origin, so the camera list
+// is inlined rather than loaded. The frames are still current -- each <img>
+// pulls a fresh snapshot through the public image proxy, and images need no CORS.
+const PROXY = 'https://cams.hoxel.dev/api/image?path=';
+const CAMERAS=[
+  {l:"23rd Ave E & E Cherry St NS",p:"/trafficcams/images/23_E_Cherry_NS.jpg",v:1,y:[47.6083,-122.3028]},
+  {l:"Fairview Ave & Boren Ave",p:"/trafficcams/images/Fairview_Boren_NS.jpg",v:1,y:[47.6179,-122.3343]},
+  {l:"W Seattle Bridge near SW Charlestown St",p:"/trafficcams/images/WSea_FwyPullOut_EW.jpg",v:1,y:[47.5701,-122.373]},
+  {l:"4th Ave & Cherry St EW",p:"/trafficcams/images/4_Cherry_EW.jpg",v:1,y:[47.6038,-122.3312]},
+  {l:"Corson Ave S & S Bailey St / S Michigan St",p:"/trafficcams/images/Corson_S_Bailey_EW.jpg",v:1,y:[47.5475,-122.3214]},
+  {l:"Fremont Ave N & N 34th St NS",p:"/trafficcams/images/Fremont_N_34_NS.jpg",v:1,y:[47.6496,-122.3497]},
+  {l:"5th Ave NE & Northgate Way 2",p:"/trafficcams/images/5_NE_Northgate2.jpg",v:1,y:[47.7086,-122.3233]},
+  {l:"7th Ave & Bell St",p:"/trafficcams/images/7_Bell.jpg",v:1,y:[47.6174,-122.3414]},
+  {l:"E Marginal Way S & 16th Ave S",p:"/trafficcams/images/EMarg_S_16_NS.jpg",v:1,y:[47.5343,-122.3132]},
+  {l:"Queen Anne Ave N & Roy St",p:"/trafficcams/images/QAnne_N_Roy_NS.jpg",v:1,y:[47.6255,-122.3567]},
+  {l:"Alaskan Way & Madison St",p:"/trafficcams/images/Alaskan_Madison_NS.jpg",v:1,y:[47.6038,-122.3382]},
+  {l:"1st Ave NE & NE 130th St",p:"/trafficcams/images/SDOT_Portable_5.jpg",v:0,y:[47.7232,-122.3289]},
+  {l:"12th Ave S & Boren Ave S",p:"/trafficcams/images/12_S_Boren.jpg",v:1,y:[47.6009,-122.317]},
+  {l:"9th Ave & James St",p:"/trafficcams/images/9_James_EW.jpg",v:1,y:[47.6056,-122.3247]},
+  {l:"Alaskan Way & Union St",p:"/trafficcams/images/Alaskan_Union.jpg",v:1,y:[47.6071,-122.341]},
+  {l:"1st Ave & Union St",p:"/trafficcams/images/1_Union_NS.jpg",v:1,y:[47.6078,-122.3391]},
+  {l:"Fairview Ave N & Mercer St NS",p:"/trafficcams/images/Fairview_Mercer_3.jpg",v:1,y:[47.6245,-122.3342]},
+  {l:"7th Ave NE & NE 45th St",p:"/trafficcams/images/7_NE_45_SEC.jpg",v:1,y:[47.6613,-122.3207]},
+  {l:"32nd Ave NE & NE 65th St",p:"/trafficcams/images/32_NE_65_EW.jpg",v:1,y:[47.6759,-122.293]},
+  {l:"Rainier Ave S & S Henderson St",p:"/trafficcams/images/Rainier_S_Henderson_NS.jpg",v:1,y:[47.5233,-122.27]},
+  {l:"Queen Anne Ave N & Thomas St NWC",p:"/trafficcams/images/QAnne_N_Thomas_NWC.jpg",v:1,y:[47.621,-122.3568]},
+  {l:"E Marginal Way S & S Michigan St",p:"/trafficcams/images/EMarg_S_Michigan_NS.jpg",v:1,y:[47.5449,-122.3313]},
+  {l:"23rd Ave S & S Judkins St",p:"/trafficcams/images/23_S_Judkins_NS.jpg",v:1,y:[47.5919,-122.3025]},
+  {l:"MLK Way S & S Alaska St NS",p:"/trafficcams/images/MLK_S_Alaska_2.jpg",v:1,y:[47.5608,-122.2932]},
+  {l:"Eastlake Ave E & Fuhrman Ave E",p:"/trafficcams/images/Eastlake_Fuhrman.jpg",v:1,y:[47.6516,-122.3213]},
+  {l:"4th Ave S & Michigan St",p:"/trafficcams/images/4_S_Michigan_NS.jpg",v:1,y:[47.5453,-122.3296]},
+  {l:"35th Ave SW & SW Roxbury St",p:"/trafficcams/images/35_SW_Roxbury_EW.jpg",v:1,y:[47.5175,-122.3769]},
+  {l:"5th Ave NE & NE Northgate Way EW",p:"/trafficcams/images/5_NE_Northgate_EW.jpg",v:1,y:[47.7086,-122.3245]},
+  {l:"Alaskan Way & Marion St",p:"/trafficcams/images/Alaskan_Marion_NS.jpg",v:1,y:[47.6031,-122.3376]},
+  {l:"University Way NE & NE 43rd St SEC",p:"/trafficcams/images/University_NE_43_SEC.jpg",v:1,y:[47.6598,-122.3132]},
+  {l:"Alaskan Way S & S Atlantic St",p:"/trafficcams/images/Alaskan_S_Atlantic.jpg",v:1,y:[47.5903,-122.3374]},
+  {l:"Terry Ave N & Mercer St",p:"/trafficcams/images/Terry_N_Mercer_EW.jpg",v:1,y:[47.6247,-122.3371]},
+  {l:"4th Ave & Virginia St",p:"/trafficcams/images/4_Virginia.jpg",v:1,y:[47.6131,-122.34]},
+  {l:"12th Ave NE & NE 50th St",p:"/trafficcams/images/12_NE_50.jpg",v:1,y:[47.6649,-122.3152]},
+  {l:"Aurora Ave N & N 105th St EW",p:"/trafficcams/images/Aurora_N_105_EW.jpg",v:1,y:[47.7051,-122.3447]},
+  {l:"5th Ave & Spring St",p:"/trafficcams/images/5_Spring_EW.jpg",v:1,y:[47.6073,-122.3325]},
+  {l:"Fairview Ave N & Mercer St EW",p:"/trafficcams/images/Fairview_Mercer_5.jpg",v:1,y:[47.6248,-122.3344]},
+  {l:"4th Ave S & Spokane Viaduct",p:"/trafficcams/images/4_S_Spokane_EW.jpg",v:1,y:[47.5716,-122.3291]},
+  {l:"Aurora Ave N & N Winona St",p:"/trafficcams/images/Aurora_N_Winona_NS.jpg",v:1,y:[47.6828,-122.3445]},
+  {l:"1st Ave S & S Hudson St",p:"/trafficcams/images/1_S_Hudson_NS.jpg",v:1,y:[47.5574,-122.3342]},
+  {l:"California Ave SW & SW Hanford St",p:"/trafficcams/images/California_SW_Hanford_NS.jpg",v:1,y:[47.5756,-122.3868]},
+  {l:"3rd Ave & Wall St",p:"/trafficcams/images/3_Wall_NS.jpg",v:1,y:[47.616,-122.347]},
+  {l:"Taylor Ave & Mercer St",p:"/trafficcams/images/Taylor_N_Mercer_EW.jpg",v:1,y:[47.6246,-122.3463]},
+  {l:"1st Ave S & S Lander St",p:"/trafficcams/images/1_S_Lander_NS.jpg",v:1,y:[47.5798,-122.3342]},
+  {l:"3rd Ave & Columbia St",p:"/trafficcams/images/3_Columbia_EW.jpg",v:1,y:[47.6042,-122.3327]},
+  {l:"Greenwood Ave N & N 105th St",p:"/trafficcams/images/Greenwood_N_105_NS.jpg",v:1,y:[47.7051,-122.3555]},
+  {l:"4th Ave S & S Atlantic St",p:"/trafficcams/images/4_S_Atlantic_EW.jpg",v:1,y:[47.5903,-122.3291]},
+  {l:"Aurora Ave N & N 145th St EW",p:"/trafficcams/images/Aurora_N_145_1.jpg",v:1,y:[47.7341,-122.345]},
+  {l:"Westlake Ave & Denny Way EW",p:"/trafficcams/images/Westlake_Denny_EW.jpg",v:1,y:[47.6185,-122.3384]},
+  {l:"Brooklyn Ave NE & NE 45th St",p:"/trafficcams/images/Brooklyn_NE_45_NEC.jpg",v:1,y:[47.6613,-122.3142]},
+  {l:"4th Ave & Battery St",p:"/trafficcams/images/4_Battery_EW.jpg",v:1,y:[47.6161,-122.3451]},
+  {l:"1st Ave & Yesler Way",p:"/trafficcams/images/1_Yesler_EW.jpg",v:1,y:[47.6017,-122.3342]},
+  {l:"3rd Ave & Spring St",p:"/trafficcams/images/3_Spring_EW.jpg",v:1,y:[47.6063,-122.3347]},
+  {l:"Broadway & E Pike St NS",p:"/trafficcams/images/Broadway_E_Pike_NS.jpg",v:1,y:[47.6138,-122.3208]},
+  {l:"Lake City Way & NE 125th St 2",p:"/trafficcams/images/LCW_NE_125_2.jpg",v:1,y:[47.7191,-122.2953]},
+  {l:"Aurora Ave N & N 90th St",p:"/trafficcams/images/Aurora_N_90_NS.jpg",v:1,y:[47.6942,-122.3446]},
+  {l:"5th Ave & Olive Way",p:"/trafficcams/images/5_Olive.jpg",v:1,y:[47.6127,-122.3374]}
+];
+const pickCameras = (n) => CAMERAS.slice(0, n).map((c) => ({
+  label: c.l, img: PROXY + encodeURIComponent(c.p) + '&w=480', live: Boolean(c.v), lat: c.y[0], lng: c.y[1],
+}));
+const clockAt = (minutesAgo) => new Date(Date.now() - minutesAgo * 60000)
+  .toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
 document.getElementById('clk').textContent = clockAt(0);
-const cams = await loadCameras(48);
+const cams = pickCameras(48);
 document.getElementById('wall').innerHTML = cams.map((c, i) => `
   <div class="cell">
     <img src="${c.img}" alt="">

@@ -107,8 +107,9 @@ rather than a shrunk desktop. The information architecture is the right shape.
 
 ## Three directions
 
-Working mockups live in [`design/alternatives/`](./design/alternatives/) — see
-that README for the density table and how to open them.
+Working mockups live in [`design/alternatives/`](./design/alternatives/). Each
+is a self-contained page that renders real SDOT frames; open one directly in a
+browser. See that README for the density table.
 
 - **A — Signal.** A civic document: paper ground, one heavy rule under the
   masthead, plates in a row. 0px radius, no shadows, no blur. Amber means

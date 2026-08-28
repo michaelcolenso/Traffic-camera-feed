@@ -1,10 +1,9 @@
 # Design direction mockups
 
 Three alternative visual directions for Seattle Traffic Watch, written as
-standalone pages. Open any of them directly in a browser — each fetches the
-live camera catalogue from `https://cams.hoxel.dev/api/cameras` and renders
-real SDOT frames, so they show the real content at real density rather than
-placeholder boxes.
+standalone pages. Open any of them directly in a browser — no build step and
+no local server needed — and each renders real SDOT frames, so the directions
+can be judged at real content and real density rather than on placeholder boxes.
 
 | File | Direction | Position |
 | --- | --- | --- |
@@ -12,9 +11,16 @@ placeholder boxes.
 | `02-wall.html` | **Wall** | An operator's monitor wall. Neutral black, no glow or blur or radius, 2px gutters, edge to edge, labels burned into the frame. |
 | `03-plate.html` | **Plate** | The city as a photographic record. Serif lede, one large frame, plates in a slow grid. Built for the Pulse and history features. |
 
-`_data.js` is the shared loader. When a `/data.json` file is served from the
-same origin it is used instead of the live API, which is how the screenshots in
-the audit were captured against a fixed set of frames.
+Each page is self-contained. The camera list is inlined as a fixture rather
+than fetched, for two reasons: a page opened from `file://` cannot use ES module
+imports or `fetch()` from its opaque origin, and `/api/cameras` on the worker
+sets no `Access-Control-Allow-Origin`, so a cross-origin fetch of the catalogue
+would be blocked anyway.
+
+The frames themselves are still current. Each `<img>` pulls a fresh snapshot
+through `https://cams.hoxel.dev/api/image`, and images render cross-origin
+without needing CORS headers. Only the list of cameras is frozen, and that list
+changes rarely.
 
 Measured on the rendered pages, catalogue padded to 60 cameras:
 
