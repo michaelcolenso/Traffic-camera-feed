@@ -153,8 +153,10 @@ const pickCameras = (n) => CAMERAS.slice(0, n).map((c) => ({
 const clockAt = (minutesAgo) => new Date(Date.now() - minutesAgo * 60000)
   .toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-const cams = pickCameras(10);
-const [lead, ...rest] = cams;
+// The lede tells an Aurora story, so the lead frame has to be an Aurora camera.
+const leadIndex = Math.max(0, CAMERAS.findIndex((c) => /Aurora/.test(c.l)));
+const lead = pickCameras(CAMERAS.length)[leadIndex];
+const rest = pickCameras(CAMERAS.length).filter((_, i) => i !== leadIndex).slice(0, 9);
 document.getElementById('stamp').textContent = 'All frames ' + clockAt(1) + ' PDT';
 document.getElementById('lede').innerHTML = `
   <div class="frame"><img src="${lead.img}" alt=""></div>

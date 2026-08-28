@@ -10,8 +10,9 @@ which covers task clarity and accessibility and still stands.
 ## The headline finding
 
 **167 of the 170 color declarations in the stylesheet are unedited Tailwind
-default values.** The three exceptions — `#0d2840`, `#06111f`, `#0a1220` —
-exist only to build the background glow.
+default values.** Only three are not: `#0d2840` and `#06111f` are the inner
+stops of the body glow, and `rgba(10,18,32,.82)` is the bottom stop of the
+`.camera-card` gradient. Every other value in the file came out of the box.
 
 The stylesheet does not use Tailwind. The palette was copied out of it:
 
@@ -34,7 +35,9 @@ Ordered by how loudly each announces itself.
 
 ### Color
 
-1. **The palette is Tailwind's, unedited.** See above.
+1. **The palette is Tailwind's, unedited.** See above. Even the three custom
+   values are only darker mixes of the same slate ramp, chosen to sit under it
+   rather than to depart from it.
 2. **One accent does every job.** `#67e8f9` appears 42 times: eyebrow, active
    chip, LIVE text, focus ring, map marker, compare divider, score pill, play
    hover, map HUD, nearby link, event badge, dock active state. When one hue
