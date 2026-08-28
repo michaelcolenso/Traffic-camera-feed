@@ -51,11 +51,26 @@ Ordered by how loudly each announces itself.
 
 ### Surface
 
-4. **Everything is a rounded, floating, blurred card.** 8 distinct radii, all
-   inside the same 0.55–1rem band; 6 `backdrop-filter: blur()` declarations;
-   the same `border:1px solid rgba(148,163,184,.16)` plus
-   `box-shadow:0 12px 28px rgba(0,0,0,.18)` on cards, settings, diagnostics,
-   dock, HUD, modal and pulse rail. Uniform treatment means no hierarchy.
+4. **Everything is a rounded, floating, blurred panel.** 8 distinct radii, all
+   inside the same 0.55–1rem band, and 6 `backdrop-filter: blur()` declarations.
+   The shadows are not one shared declaration — they are the same recipe retyped
+   with different numbers on every surface:
+
+   | Surface | Hairline | Shadow |
+   | --- | --- | --- |
+   | `.camera-card` | slate-400 @ .16 | `0 12px 28px rgba(0,0,0,.18)` |
+   | `.settings` | cyan-300 @ .20 | `0 18px 50px rgba(0,0,0,.28)` |
+   | `.mobile-dock` | cyan-300 @ .20 | `0 18px 35px rgba(0,0,0,.55)` |
+   | `.pulse-event-hud` | cyan-300 @ .34 | `0 18px 45px rgba(0,0,0,.45)` |
+   | `dialog` | cyan-300 @ .28 | `0 24px 70px rgba(0,0,0,.60)` |
+   | `.diagnostics` | cyan-300 @ .18 | none |
+   | `.map-hud` | cyan-300 @ .22 | none |
+
+   Every hairline is one of two colors at a slightly different alpha, and every
+   shadow is `0 Npx Mpx rgba(0,0,0,a)` at a slightly different magnitude. That
+   is the tell: not copy-paste, but the same gesture re-improvised seven times
+   because there is no token to reach for. The result reads uniform — nothing
+   can be more important than anything else — while being impossible to restyle.
 5. **Pill inside a pill.** `.chip` at `.7rem` radius containing a `999px` badge
    for the count, seven across. A right-aligned numeral does the same work.
 

@@ -184,8 +184,13 @@ const CAMERAS=[
 const pickCameras = (n) => CAMERAS.slice(0, n).map((c) => ({
   label: c.l, img: PROXY + encodeURIComponent(c.p) + '&w=480', live: Boolean(c.v), lat: c.y[0], lng: c.y[1],
 }));
+// The cameras are in Seattle, so the clocks are Pacific regardless of where the
+// page is opened, and the zone label is derived rather than hard-coded to PDT.
+const PACIFIC = 'America/Los_Angeles';
 const clockAt = (minutesAgo) => new Date(Date.now() - minutesAgo * 60000)
-  .toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  .toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: PACIFIC });
+const zoneLabel = () => new Intl.DateTimeFormat('en-US', { timeZone: PACIFIC, timeZoneName: 'short' })
+  .formatToParts(new Date()).find((part) => part.type === 'timeZoneName').value;
 
 document.getElementById('adv-time').textContent = 'as of ' + clockAt(2);
 const cams = pickCameras(12);
