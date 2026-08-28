@@ -9,10 +9,14 @@ which covers task clarity and accessibility and still stands.
 
 ## The headline finding
 
-**167 of the 170 color declarations in the stylesheet are unedited Tailwind
+**172 of the 175 color declarations in the stylesheet are unedited Tailwind
 default values.** Only three are not: `#0d2840` and `#06111f` are the inner
 stops of the body glow, and `rgba(10,18,32,.82)` is the bottom stop of the
 `.camera-card` gradient. Every other value in the file came out of the box.
+
+The census counts every color literal in `benchmark.css` and `evidence.css` —
+71 six-digit hex, 5 shorthand hex (`#fff` ×3, `#000` ×2), and 99 `rgb()`/`rgba()`
+declarations — so the number is reproducible from the two files.
 
 The stylesheet does not use Tailwind. The palette was copied out of it:
 
@@ -51,10 +55,13 @@ Ordered by how loudly each announces itself.
 
 ### Surface
 
-4. **Everything is a rounded, floating, blurred panel.** 8 distinct radii, all
-   inside the same 0.55–1rem band, and 6 `backdrop-filter: blur()` declarations.
-   The shadows are not one shared declaration — they are the same recipe retyped
-   with different numbers on every surface:
+4. **Everything is a rounded, floating, blurred panel.** 14 distinct
+   `border-radius` values, of which **12 are rounded rectangles** — `.35rem`,
+   `.55rem`, `.65rem`, `.7rem`, `.72rem`, `.75rem`, `.8rem`, `.85rem`, `.9rem`,
+   `1rem`, and then `8px` and `14px` in a second unit system — plus `999px`
+   pills and one `50%` circle. Six `backdrop-filter: blur()` declarations.
+   The shadows are not one shared declaration either; they are the same recipe
+   retyped with different numbers on every surface:
 
    | Surface | Hairline | Shadow |
    | --- | --- | --- |
@@ -66,11 +73,12 @@ Ordered by how loudly each announces itself.
    | `.diagnostics` | cyan-300 @ .18 | none |
    | `.map-hud` | cyan-300 @ .22 | none |
 
-   Every hairline is one of two colors at a slightly different alpha, and every
-   shadow is `0 Npx Mpx rgba(0,0,0,a)` at a slightly different magnitude. That
-   is the tell: not copy-paste, but the same gesture re-improvised seven times
-   because there is no token to reach for. The result reads uniform — nothing
-   can be more important than anything else — while being impossible to restyle.
+   Every hairline is one of two colors at a slightly different alpha, every
+   shadow is `0 Npx Mpx rgba(0,0,0,a)` at a slightly different magnitude, and
+   every corner is its own hand-picked radius. That is the tell: not copy-paste,
+   but the same gesture re-improvised a dozen times because there is no token to
+   reach for. The result reads uniform — nothing can be more important than
+   anything else — while being impossible to restyle.
 5. **Pill inside a pill.** `.chip` at `.7rem` radius containing a `999px` badge
    for the count, seven across. A right-aligned numeral does the same work.
 
@@ -154,9 +162,10 @@ ships, ship **Wall**: it removes every tell above at once, by removing the
 effects rather than restyling them.
 
 The order of work matters more than the direction, because the current
-stylesheet cannot be restyled — 170 color literals, zero custom properties:
+stylesheet cannot be restyled — 175 color literals, 12 rounded-rectangle
+radii, zero custom properties:
 
-1. **Extract tokens first.** Replace all 170 literals with a variable set —
+1. **Extract tokens first.** Replace all 175 literals with a variable set —
    ground, surface, rule, ink, muted, accent — plus a separate semantic trio
    for live / stale / down. Nothing changes visually; every later step becomes
    a one-file edit.

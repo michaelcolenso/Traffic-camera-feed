@@ -159,18 +159,24 @@ const zoneLabel = () => new Intl.DateTimeFormat('en-US', { timeZone: PACIFIC, ti
   .formatToParts(new Date()).find((part) => part.type === 'timeZoneName').value;
 
 // The lede tells an Aurora story, so the lead frame has to be an Aurora camera.
+// The story and the frames must be read off the same clock, or the lede claims
+// an eleven-minute queue next to a timestamp from hours ago.
+const LEAD_AGE = 1;            // how old the lead frame itself is
+const QUEUE_MINUTES = 11;      // how long the queue has stood, as of that frame
+const QUEUE_WORD = 'Eleven';
+const queueStart = clockAt(LEAD_AGE + QUEUE_MINUTES).slice(0, 5);
 const leadIndex = Math.max(0, CAMERAS.findIndex((c) => /Aurora/.test(c.l)));
 const lead = pickCameras(CAMERAS.length)[leadIndex];
 const rest = pickCameras(CAMERAS.length).filter((_, i) => i !== leadIndex).slice(0, 9);
-document.getElementById('stamp').textContent = 'All frames ' + clockAt(1) + ' ' + zoneLabel();
+document.getElementById('stamp').textContent = 'All frames ' + clockAt(LEAD_AGE) + ' ' + zoneLabel();
 document.getElementById('lede').innerHTML = `
   <div class="frame"><img src="${lead.img}" alt=""></div>
   <div class="cap">
     <div>
-      <h2>Eleven minutes of stopped traffic on Aurora, and nobody has said anything yet.</h2>
-      <p>Three cameras between N 85th and N 105th have shown the same northbound queue since 5:41. The pattern held through four refreshes, which is usually a collision rather than the ordinary morning slowdown.</p>
+      <h2>${QUEUE_WORD} minutes of stopped traffic on Aurora, and nobody has said anything yet.</h2>
+      <p>Three cameras between N 85th and N 105th have shown the same northbound queue since ${queueStart}. The pattern held through four refreshes, which is usually a collision rather than the ordinary morning slowdown.</p>
     </div>
-    <div class="meta"><b>${lead.label}</b>Frame ${clockAt(1)} ${zoneLabel()}<br>Live feed available<br>${lead.lat ? lead.lat.toFixed(4) + ' / ' + lead.lng.toFixed(4) : ''}</div>
+    <div class="meta"><b>${lead.label}</b>Frame ${clockAt(LEAD_AGE)} ${zoneLabel()}<br>Live feed available<br>${lead.lat ? lead.lat.toFixed(4) + ' / ' + lead.lng.toFixed(4) : ''}</div>
   </div>`;
 document.getElementById('plates').innerHTML = rest.map((c, i) => `
   <figure>
