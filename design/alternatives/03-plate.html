@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Direction 3 — Plate</title>
+<link rel="stylesheet" href="/fonts.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,300&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#171614; --mat:#211f1c; --rule:#302d29;
+  --text:#e9e4db; --muted:#918a7e; --bone:#d8cab2;
+  --serif:'Newsreader',Georgia,serif; --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--text);font-family:var(--serif);font-size:17px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.shell{display:grid;grid-template-columns:232px minmax(0,1fr);gap:56px;max-width:1400px;margin:0 auto;padding:48px 44px 90px}
+
+/* Left rail: an index, not a toolbar. */
+.rail{position:sticky;top:48px;align-self:start}
+.rail h1{margin:0 0 4px;font-weight:300;font-size:30px;line-height:1.08;letter-spacing:-.01em}
+.rail h1 em{display:block;font-style:italic;color:var(--bone)}
+.rail .sub{margin:0 0 30px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);line-height:1.7}
+.rail nav{border-top:1px solid var(--rule)}
+.rail nav button{display:flex;justify-content:space-between;align-items:baseline;width:100%;appearance:none;border:0;border-bottom:1px solid var(--rule);background:none;font:inherit;font-size:16px;color:var(--muted);text-align:left;padding:9px 0;cursor:pointer}
+.rail nav button span{font-family:var(--mono);font-size:10px;color:#615c54}
+.rail nav button.on{color:var(--text)}
+.rail nav button.on span{color:var(--bone)}
+.rail .find{margin-top:22px}
+.rail .find input{width:100%;appearance:none;border:0;border-bottom:1px solid var(--rule);background:none;font:inherit;font-size:15px;color:var(--text);padding:6px 0}
+.rail .find input::placeholder{color:#615c54;font-style:italic}
+
+/* The lede: one big frame carries the story the chip rail used to gesture at. */
+.lede{margin:0 0 52px}
+.lede .frame{background:var(--mat);padding:9px;border:1px solid var(--rule)}
+.lede img{display:block;width:100%;aspect-ratio:21/9;object-fit:cover}
+.lede .cap{display:grid;grid-template-columns:minmax(0,1fr) 210px;gap:40px;padding-top:16px}
+.lede h2{margin:0 0 8px;font-weight:300;font-size:27px;line-height:1.22;letter-spacing:-.012em}
+.lede p{margin:0;font-size:17px;color:#c6bfb3;max-width:56ch}
+.lede .meta{font-family:var(--mono);font-size:10px;line-height:1.9;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);border-left:1px solid var(--rule);padding-left:18px}
+.lede .meta b{display:block;color:var(--bone);font-weight:400}
+
+.sectionrule{display:flex;align-items:baseline;gap:14px;border-top:1px solid var(--rule);padding-top:13px;margin-bottom:26px}
+.sectionrule h3{margin:0;font-weight:400;font-size:17px;font-style:italic;color:var(--bone)}
+.sectionrule span{margin-left:auto;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+
+.plates{display:grid;grid-template-columns:repeat(3,1fr);gap:44px 34px}
+.plates figure{margin:0}
+.plates .frame{background:var(--mat);padding:7px;border:1px solid var(--rule)}
+.plates img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover}
+.plates figcaption{padding-top:11px}
+.plates h4{margin:0;font-weight:400;font-size:17px;line-height:1.3;letter-spacing:-.005em}
+.plates .note{margin:3px 0 0;font-family:var(--mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.plates .note em{font-style:normal;color:var(--bone)}
+@media(max-width:1000px){.shell{grid-template-columns:1fr;gap:34px;padding:32px 24px 70px}.rail{position:static}.plates{grid-template-columns:repeat(2,1fr)}.lede .cap{grid-template-columns:1fr}.lede .meta{border-left:0;border-top:1px solid var(--rule);padding:12px 0 0}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="rail">
+    <h1>Seattle,<em>as it stands</em></h1>
+    <p class="sub">387 public cameras<br>Refreshed every minute<br>SDOT open data</p>
+    <nav>
+      <button class="on">Everywhere <span>387</span></button>
+      <button>Downtown <span>98</span></button>
+      <button>The bridges <span>24</span></button>
+      <button>I-5 <span>41</span></button>
+      <button>Aurora <span>20</span></button>
+      <button>Dark cameras <span>6</span></button>
+    </nav>
+    <label class="find"><input placeholder="Find an intersection…"></label>
+  </aside>
+
+  <main>
+    <article class="lede" id="lede"></article>
+    <div class="sectionrule">
+      <h3>Elsewhere in the city</h3>
+      <span id="stamp"></span>
+    </div>
+    <div class="plates" id="plates"></div>
+  </main>
+</div>
+
+<script>
+// Self-contained on purpose: opened from the filesystem, a browser refuses both
+// module imports and fetch() from the opaque file:// origin, so the camera list
+// is inlined rather than loaded. The frames are still current -- each <img>
+// pulls a fresh snapshot through the public image proxy, and images need no CORS.
+const PROXY = 'https://cams.hoxel.dev/api/image?path=';
+const CAMERAS=[
+  {l:"23rd Ave E & E Cherry St NS",p:"/trafficcams/images/23_E_Cherry_NS.jpg",v:1,y:[47.6083,-122.3028]},
+  {l:"Fairview Ave & Boren Ave",p:"/trafficcams/images/Fairview_Boren_NS.jpg",v:1,y:[47.6179,-122.3343]},
+  {l:"W Seattle Bridge near SW Charlestown St",p:"/trafficcams/images/WSea_FwyPullOut_EW.jpg",v:1,y:[47.5701,-122.373]},
+  {l:"4th Ave & Cherry St EW",p:"/trafficcams/images/4_Cherry_EW.jpg",v:1,y:[47.6038,-122.3312]},
+  {l:"Corson Ave S & S Bailey St / S Michigan St",p:"/trafficcams/images/Corson_S_Bailey_EW.jpg",v:1,y:[47.5475,-122.3214]},
+  {l:"Fremont Ave N & N 34th St NS",p:"/trafficcams/images/Fremont_N_34_NS.jpg",v:1,y:[47.6496,-122.3497]},
+  {l:"5th Ave NE & Northgate Way 2",p:"/trafficcams/images/5_NE_Northgate2.jpg",v:1,y:[47.7086,-122.3233]},
+  {l:"7th Ave & Bell St",p:"/trafficcams/images/7_Bell.jpg",v:1,y:[47.6174,-122.3414]},
+  {l:"E Marginal Way S & 16th Ave S",p:"/trafficcams/images/EMarg_S_16_NS.jpg",v:1,y:[47.5343,-122.3132]},
+  {l:"Queen Anne Ave N & Roy St",p:"/trafficcams/images/QAnne_N_Roy_NS.jpg",v:1,y:[47.6255,-122.3567]},
+  {l:"Alaskan Way & Madison St",p:"/trafficcams/images/Alaskan_Madison_NS.jpg",v:1,y:[47.6038,-122.3382]},
+  {l:"1st Ave NE & NE 130th St",p:"/trafficcams/images/SDOT_Portable_5.jpg",v:0,y:[47.7232,-122.3289]},
+  {l:"12th Ave S & Boren Ave S",p:"/trafficcams/images/12_S_Boren.jpg",v:1,y:[47.6009,-122.317]},
+  {l:"9th Ave & James St",p:"/trafficcams/images/9_James_EW.jpg",v:1,y:[47.6056,-122.3247]},
+  {l:"Alaskan Way & Union St",p:"/trafficcams/images/Alaskan_Union.jpg",v:1,y:[47.6071,-122.341]},
+  {l:"1st Ave & Union St",p:"/trafficcams/images/1_Union_NS.jpg",v:1,y:[47.6078,-122.3391]},
+  {l:"Fairview Ave N & Mercer St NS",p:"/trafficcams/images/Fairview_Mercer_3.jpg",v:1,y:[47.6245,-122.3342]},
+  {l:"7th Ave NE & NE 45th St",p:"/trafficcams/images/7_NE_45_SEC.jpg",v:1,y:[47.6613,-122.3207]},
+  {l:"32nd Ave NE & NE 65th St",p:"/trafficcams/images/32_NE_65_EW.jpg",v:1,y:[47.6759,-122.293]},
+  {l:"Rainier Ave S & S Henderson St",p:"/trafficcams/images/Rainier_S_Henderson_NS.jpg",v:1,y:[47.5233,-122.27]},
+  {l:"Queen Anne Ave N & Thomas St NWC",p:"/trafficcams/images/QAnne_N_Thomas_NWC.jpg",v:1,y:[47.621,-122.3568]},
+  {l:"E Marginal Way S & S Michigan St",p:"/trafficcams/images/EMarg_S_Michigan_NS.jpg",v:1,y:[47.5449,-122.3313]},
+  {l:"23rd Ave S & S Judkins St",p:"/trafficcams/images/23_S_Judkins_NS.jpg",v:1,y:[47.5919,-122.3025]},
+  {l:"MLK Way S & S Alaska St NS",p:"/trafficcams/images/MLK_S_Alaska_2.jpg",v:1,y:[47.5608,-122.2932]},
+  {l:"Eastlake Ave E & Fuhrman Ave E",p:"/trafficcams/images/Eastlake_Fuhrman.jpg",v:1,y:[47.6516,-122.3213]},
+  {l:"4th Ave S & Michigan St",p:"/trafficcams/images/4_S_Michigan_NS.jpg",v:1,y:[47.5453,-122.3296]},
+  {l:"35th Ave SW & SW Roxbury St",p:"/trafficcams/images/35_SW_Roxbury_EW.jpg",v:1,y:[47.5175,-122.3769]},
+  {l:"5th Ave NE & NE Northgate Way EW",p:"/trafficcams/images/5_NE_Northgate_EW.jpg",v:1,y:[47.7086,-122.3245]},
+  {l:"Alaskan Way & Marion St",p:"/trafficcams/images/Alaskan_Marion_NS.jpg",v:1,y:[47.6031,-122.3376]},
+  {l:"University Way NE & NE 43rd St SEC",p:"/trafficcams/images/University_NE_43_SEC.jpg",v:1,y:[47.6598,-122.3132]},
+  {l:"Alaskan Way S & S Atlantic St",p:"/trafficcams/images/Alaskan_S_Atlantic.jpg",v:1,y:[47.5903,-122.3374]},
+  {l:"Terry Ave N & Mercer St",p:"/trafficcams/images/Terry_N_Mercer_EW.jpg",v:1,y:[47.6247,-122.3371]},
+  {l:"4th Ave & Virginia St",p:"/trafficcams/images/4_Virginia.jpg",v:1,y:[47.6131,-122.34]},
+  {l:"12th Ave NE & NE 50th St",p:"/trafficcams/images/12_NE_50.jpg",v:1,y:[47.6649,-122.3152]},
+  {l:"Aurora Ave N & N 105th St EW",p:"/trafficcams/images/Aurora_N_105_EW.jpg",v:1,y:[47.7051,-122.3447]},
+  {l:"5th Ave & Spring St",p:"/trafficcams/images/5_Spring_EW.jpg",v:1,y:[47.6073,-122.3325]},
+  {l:"Fairview Ave N & Mercer St EW",p:"/trafficcams/images/Fairview_Mercer_5.jpg",v:1,y:[47.6248,-122.3344]},
+  {l:"4th Ave S & Spokane Viaduct",p:"/trafficcams/images/4_S_Spokane_EW.jpg",v:1,y:[47.5716,-122.3291]},
+  {l:"Aurora Ave N & N Winona St",p:"/trafficcams/images/Aurora_N_Winona_NS.jpg",v:1,y:[47.6828,-122.3445]},
+  {l:"1st Ave S & S Hudson St",p:"/trafficcams/images/1_S_Hudson_NS.jpg",v:1,y:[47.5574,-122.3342]},
+  {l:"California Ave SW & SW Hanford St",p:"/trafficcams/images/California_SW_Hanford_NS.jpg",v:1,y:[47.5756,-122.3868]},
+  {l:"3rd Ave & Wall St",p:"/trafficcams/images/3_Wall_NS.jpg",v:1,y:[47.616,-122.347]},
+  {l:"Taylor Ave & Mercer St",p:"/trafficcams/images/Taylor_N_Mercer_EW.jpg",v:1,y:[47.6246,-122.3463]},
+  {l:"1st Ave S & S Lander St",p:"/trafficcams/images/1_S_Lander_NS.jpg",v:1,y:[47.5798,-122.3342]},
+  {l:"3rd Ave & Columbia St",p:"/trafficcams/images/3_Columbia_EW.jpg",v:1,y:[47.6042,-122.3327]},
+  {l:"Greenwood Ave N & N 105th St",p:"/trafficcams/images/Greenwood_N_105_NS.jpg",v:1,y:[47.7051,-122.3555]},
+  {l:"4th Ave S & S Atlantic St",p:"/trafficcams/images/4_S_Atlantic_EW.jpg",v:1,y:[47.5903,-122.3291]},
+  {l:"Aurora Ave N & N 145th St EW",p:"/trafficcams/images/Aurora_N_145_1.jpg",v:1,y:[47.7341,-122.345]},
+  {l:"Westlake Ave & Denny Way EW",p:"/trafficcams/images/Westlake_Denny_EW.jpg",v:1,y:[47.6185,-122.3384]},
+  {l:"Brooklyn Ave NE & NE 45th St",p:"/trafficcams/images/Brooklyn_NE_45_NEC.jpg",v:1,y:[47.6613,-122.3142]},
+  {l:"4th Ave & Battery St",p:"/trafficcams/images/4_Battery_EW.jpg",v:1,y:[47.6161,-122.3451]},
+  {l:"1st Ave & Yesler Way",p:"/trafficcams/images/1_Yesler_EW.jpg",v:1,y:[47.6017,-122.3342]},
+  {l:"3rd Ave & Spring St",p:"/trafficcams/images/3_Spring_EW.jpg",v:1,y:[47.6063,-122.3347]},
+  {l:"Broadway & E Pike St NS",p:"/trafficcams/images/Broadway_E_Pike_NS.jpg",v:1,y:[47.6138,-122.3208]},
+  {l:"Lake City Way & NE 125th St 2",p:"/trafficcams/images/LCW_NE_125_2.jpg",v:1,y:[47.7191,-122.2953]},
+  {l:"Aurora Ave N & N 90th St",p:"/trafficcams/images/Aurora_N_90_NS.jpg",v:1,y:[47.6942,-122.3446]},
+  {l:"5th Ave & Olive Way",p:"/trafficcams/images/5_Olive.jpg",v:1,y:[47.6127,-122.3374]}
+];
+const pickCameras = (n) => CAMERAS.slice(0, n).map((c) => ({
+  label: c.l, img: PROXY + encodeURIComponent(c.p) + '&w=480', live: Boolean(c.v), lat: c.y[0], lng: c.y[1],
+}));
+// The cameras are in Seattle, so the clocks are Pacific regardless of where the
+// page is opened, and the zone label is derived rather than hard-coded to PDT.
+const PACIFIC = 'America/Los_Angeles';
+const clockAt = (minutesAgo) => new Date(Date.now() - minutesAgo * 60000)
+  .toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: PACIFIC });
+const zoneLabel = () => new Intl.DateTimeFormat('en-US', { timeZone: PACIFIC, timeZoneName: 'short' })
+  .formatToParts(new Date()).find((part) => part.type === 'timeZoneName').value;
+
+// The lede tells an Aurora story, so the lead frame has to be an Aurora camera.
+// The story and the frames must be read off the same clock, or the lede claims
+// an eleven-minute queue next to a timestamp from hours ago.
+const LEAD_AGE = 1;            // how old the lead frame itself is
+const QUEUE_MINUTES = 11;      // how long the queue has stood, as of that frame
+const QUEUE_WORD = 'Eleven';
+const queueStart = clockAt(LEAD_AGE + QUEUE_MINUTES).slice(0, 5);
+// The lede describes a northbound queue between N 85th and N 105th, so the lead
+// frame has to be an Aurora camera pointed north-south inside that stretch. An
+// EW camera looks across the highway rather than along it, and would show no queue.
+const isAurora = (c) => /Aurora/i.test(c.l);
+const isNorthSouth = (c) => /_NS\.jpg$/i.test(c.p);
+const inCorridor = (c) => /\bN (?:8[5-9]|9\d|10[0-5])th\b/.test(c.l);
+const leadIndex = Math.max(0, [
+  CAMERAS.findIndex((c) => isAurora(c) && isNorthSouth(c) && inCorridor(c)),
+  CAMERAS.findIndex((c) => isAurora(c) && isNorthSouth(c)),
+  CAMERAS.findIndex(isAurora),
+].find((i) => i >= 0) ?? 0);
+// SDOT cameras refresh independently, so the plates carry different ages. The
+// heading has to describe that spread rather than claim a single capture time.
+const plateAge = (i) => i % 3;
+const lead = pickCameras(CAMERAS.length)[leadIndex];
+const rest = pickCameras(CAMERAS.length).filter((_, i) => i !== leadIndex).slice(0, 9);
+const frameAges = [LEAD_AGE, ...rest.map((_, i) => plateAge(i))];
+document.getElementById('stamp').textContent =
+  `Frames ${clockAt(Math.max(...frameAges)).slice(0, 5)}\u2013${clockAt(Math.min(...frameAges)).slice(0, 5)} ${zoneLabel()}`;
+document.getElementById('lede').innerHTML = `
+  <div class="frame"><img src="${lead.img}" alt=""></div>
+  <div class="cap">
+    <div>
+      <h2>${QUEUE_WORD} minutes of stopped traffic on Aurora, and nobody has said anything yet.</h2>
+      <p>Three cameras between N 85th and N 105th have shown the same northbound queue since ${queueStart}. The pattern held through four refreshes, which is usually a collision rather than the ordinary morning slowdown.</p>
+    </div>
+    <div class="meta"><b>${lead.label}</b>Frame ${clockAt(LEAD_AGE)} ${zoneLabel()}<br>Live feed available<br>${lead.lat ? lead.lat.toFixed(4) + ' / ' + lead.lng.toFixed(4) : ''}</div>
+  </div>`;
+document.getElementById('plates').innerHTML = rest.map((c, i) => `
+  <figure>
+    <div class="frame"><img src="${c.img}" alt=""></div>
+    <figcaption>
+      <h4>${c.label}</h4>
+      <p class="note">${clockAt(plateAge(i))} · ${c.live ? '<em>live feed</em>' : 'still only'}</p>
+    </figcaption>
+  </figure>`).join('');
+</script>
+</body>
+</html>

@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Direction 1 — Signal</title>
+<link rel="stylesheet" href="/fonts.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Narrow:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#f2efe9; --ink:#191b1f; --rule:#cfc9bb; --rule-soft:#e2ddd2;
+  --muted:#6b6660; --amber:#c26a00; --alert:#a8271b;
+  --sans:'Archivo',system-ui,sans-serif; --narrow:'Archivo Narrow','Archivo',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.4;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1360px;margin:0 auto;padding:0 32px}
+
+/* Masthead: one heavy rule does the work a drop shadow used to do. */
+.masthead{display:flex;align-items:flex-end;justify-content:space-between;gap:32px;padding:26px 0 14px;border-bottom:4px solid var(--ink)}
+.wordmark{font-family:var(--narrow);font-weight:700;font-size:38px;line-height:.92;letter-spacing:-.01em;text-transform:uppercase;margin:0}
+.wordmark span{display:block;font-family:var(--sans);font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:none;color:var(--muted);margin-top:7px}
+.tally{display:flex;gap:34px;text-align:right}
+.tally div{min-width:74px}
+.tally b{display:block;font-family:var(--narrow);font-weight:700;font-size:34px;line-height:1;font-variant-numeric:tabular-nums}
+.tally small{display:block;font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-top:5px}
+.tally .warn b{color:var(--alert)}
+
+/* Filters read as a table of contents, not as capsules. */
+.filters{display:flex;align-items:center;gap:28px;padding:13px 0;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+.filters button{appearance:none;flex:0 0 auto;border:0;background:none;padding:4px 0;font:inherit;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent}
+.filters button b{font-family:var(--mono);font-weight:500;font-size:11px;margin-left:6px;color:#9a948b}
+.filters button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--amber)}
+.filters button.on b{color:var(--amber)}
+.search{margin-left:auto;position:relative}
+.search input{appearance:none;width:270px;border:0;border-bottom:1px solid var(--ink);background:none;font:inherit;font-size:13px;padding:5px 0 5px 20px;color:var(--ink)}
+.search input::placeholder{color:#9a948b}
+.search svg{position:absolute;left:0;top:7px;width:13px;height:13px;stroke:var(--muted);fill:none;stroke-width:1.6}
+
+/* Standing advisory replaces the decorative "Pulse" banner. */
+.advisory{display:flex;gap:18px;align-items:baseline;padding:16px 0 15px;border-bottom:1px solid var(--rule)}
+.advisory .flag{flex:0 0 auto;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#fff;background:var(--amber);padding:4px 7px}
+.advisory p{margin:0;font-size:15px;max-width:74ch}
+.advisory p b{font-weight:600}
+.advisory time{margin-left:auto;flex:0 0 auto;font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:26px 22px;padding:26px 0 60px}
+.plate figure{margin:0}
+.plate .frame{position:relative;aspect-ratio:16/9;border:1px solid var(--ink);background:#ddd8cc;overflow:hidden}
+.plate img{display:block;width:100%;height:100%;object-fit:cover}
+.plate .idx{position:absolute;left:0;top:0;font-family:var(--mono);font-size:10px;padding:3px 5px;background:var(--ink);color:var(--paper);font-variant-numeric:tabular-nums}
+.plate figcaption{display:flex;align-items:baseline;gap:10px;padding:8px 1px 9px;border-bottom:1px solid var(--rule-soft)}
+.plate h2{margin:0;font-size:14px;font-weight:600;letter-spacing:-.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plate .state{margin-left:auto;flex:0 0 auto;display:flex;align-items:center;gap:5px;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.plate .state i{width:6px;height:6px;background:var(--muted);display:block}
+.plate .state.live{color:var(--amber)}
+.plate .state.live i{background:var(--amber)}
+.plate .geo{font-family:var(--mono);font-size:10px;color:#9a948b;padding-top:6px;display:block}
+@media(max-width:1100px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:760px){
+  .wrap{padding:0 14px}
+  .masthead{padding:14px 0 9px;border-bottom-width:3px;align-items:center}
+  .wordmark{font-size:21px}
+  .wordmark span{display:none}
+  .tally{gap:16px}
+  .tally div{min-width:0}
+  .tally b{font-size:20px}
+  .tally small{font-size:8px;letter-spacing:.07em;margin-top:2px}
+  /* Filters scroll on one line instead of stacking the fold away. */
+  .filters{gap:18px;padding:8px 0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .filters::-webkit-scrollbar{display:none}
+  .search{display:none}
+  /* The advisory keeps its first sentence and drops the detail. */
+  .advisory{padding:10px 0 9px;gap:10px}
+  .advisory p{font-size:13.5px}
+  .advisory p b{display:block}
+  .advisory p .detail,.advisory time{display:none}
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 12px;padding:14px 0 50px}
+  .plate h2{font-size:12.5px}
+  .plate .geo{display:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <h1 class="wordmark">Seattle Traffic Cameras<span>Seattle Department of Transportation · public snapshot feed</span></h1>
+    <div class="tally">
+      <div><b>387</b><small>Cameras</small></div>
+      <div><b>381</b><small>Live</small></div>
+      <div class="warn"><b>6</b><small>Down</small></div>
+    </div>
+  </header>
+
+  <nav class="filters">
+    <button class="on">All<b>387</b></button>
+    <button>Downtown<b>98</b></button>
+    <button>Bridges<b>24</b></button>
+    <button>I-5<b>41</b></button>
+    <button>Aurora / 99<b>20</b></button>
+    <button>Out of service<b>6</b></button>
+    <label class="search">
+      <svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="5"/><path d="M11 11l4 4"/></svg>
+      <input placeholder="Intersection or corridor">
+    </label>
+  </nav>
+
+  <div class="advisory">
+    <span class="flag">Advisory</span>
+    <p><b>Aurora Ave N northbound is queueing between N 85th and N 105th.</b> <span class="detail">Three cameras have shown stopped traffic in the same lanes for eleven minutes.</span></p>
+    <time id="adv-time"></time>
+  </div>
+
+  <main class="grid" id="grid"></main>
+</div>
+
+<script>
+// Self-contained on purpose: opened from the filesystem, a browser refuses both
+// module imports and fetch() from the opaque file:// origin, so the camera list
+// is inlined rather than loaded. The frames are still current -- each <img>
+// pulls a fresh snapshot through the public image proxy, and images need no CORS.
+const PROXY = 'https://cams.hoxel.dev/api/image?path=';
+const CAMERAS=[
+  {l:"23rd Ave E & E Cherry St NS",p:"/trafficcams/images/23_E_Cherry_NS.jpg",v:1,y:[47.6083,-122.3028]},
+  {l:"Fairview Ave & Boren Ave",p:"/trafficcams/images/Fairview_Boren_NS.jpg",v:1,y:[47.6179,-122.3343]},
+  {l:"W Seattle Bridge near SW Charlestown St",p:"/trafficcams/images/WSea_FwyPullOut_EW.jpg",v:1,y:[47.5701,-122.373]},
+  {l:"4th Ave & Cherry St EW",p:"/trafficcams/images/4_Cherry_EW.jpg",v:1,y:[47.6038,-122.3312]},
+  {l:"Corson Ave S & S Bailey St / S Michigan St",p:"/trafficcams/images/Corson_S_Bailey_EW.jpg",v:1,y:[47.5475,-122.3214]},
+  {l:"Fremont Ave N & N 34th St NS",p:"/trafficcams/images/Fremont_N_34_NS.jpg",v:1,y:[47.6496,-122.3497]},
+  {l:"5th Ave NE & Northgate Way 2",p:"/trafficcams/images/5_NE_Northgate2.jpg",v:1,y:[47.7086,-122.3233]},
+  {l:"7th Ave & Bell St",p:"/trafficcams/images/7_Bell.jpg",v:1,y:[47.6174,-122.3414]},
+  {l:"E Marginal Way S & 16th Ave S",p:"/trafficcams/images/EMarg_S_16_NS.jpg",v:1,y:[47.5343,-122.3132]},
+  {l:"Queen Anne Ave N & Roy St",p:"/trafficcams/images/QAnne_N_Roy_NS.jpg",v:1,y:[47.6255,-122.3567]},
+  {l:"Alaskan Way & Madison St",p:"/trafficcams/images/Alaskan_Madison_NS.jpg",v:1,y:[47.6038,-122.3382]},
+  {l:"1st Ave NE & NE 130th St",p:"/trafficcams/images/SDOT_Portable_5.jpg",v:0,y:[47.7232,-122.3289]},
+  {l:"12th Ave S & Boren Ave S",p:"/trafficcams/images/12_S_Boren.jpg",v:1,y:[47.6009,-122.317]},
+  {l:"9th Ave & James St",p:"/trafficcams/images/9_James_EW.jpg",v:1,y:[47.6056,-122.3247]},
+  {l:"Alaskan Way & Union St",p:"/trafficcams/images/Alaskan_Union.jpg",v:1,y:[47.6071,-122.341]},
+  {l:"1st Ave & Union St",p:"/trafficcams/images/1_Union_NS.jpg",v:1,y:[47.6078,-122.3391]},
+  {l:"Fairview Ave N & Mercer St NS",p:"/trafficcams/images/Fairview_Mercer_3.jpg",v:1,y:[47.6245,-122.3342]},
+  {l:"7th Ave NE & NE 45th St",p:"/trafficcams/images/7_NE_45_SEC.jpg",v:1,y:[47.6613,-122.3207]},
+  {l:"32nd Ave NE & NE 65th St",p:"/trafficcams/images/32_NE_65_EW.jpg",v:1,y:[47.6759,-122.293]},
+  {l:"Rainier Ave S & S Henderson St",p:"/trafficcams/images/Rainier_S_Henderson_NS.jpg",v:1,y:[47.5233,-122.27]},
+  {l:"Queen Anne Ave N & Thomas St NWC",p:"/trafficcams/images/QAnne_N_Thomas_NWC.jpg",v:1,y:[47.621,-122.3568]},
+  {l:"E Marginal Way S & S Michigan St",p:"/trafficcams/images/EMarg_S_Michigan_NS.jpg",v:1,y:[47.5449,-122.3313]},
+  {l:"23rd Ave S & S Judkins St",p:"/trafficcams/images/23_S_Judkins_NS.jpg",v:1,y:[47.5919,-122.3025]},
+  {l:"MLK Way S & S Alaska St NS",p:"/trafficcams/images/MLK_S_Alaska_2.jpg",v:1,y:[47.5608,-122.2932]},
+  {l:"Eastlake Ave E & Fuhrman Ave E",p:"/trafficcams/images/Eastlake_Fuhrman.jpg",v:1,y:[47.6516,-122.3213]},
+  {l:"4th Ave S & Michigan St",p:"/trafficcams/images/4_S_Michigan_NS.jpg",v:1,y:[47.5453,-122.3296]},
+  {l:"35th Ave SW & SW Roxbury St",p:"/trafficcams/images/35_SW_Roxbury_EW.jpg",v:1,y:[47.5175,-122.3769]},
+  {l:"5th Ave NE & NE Northgate Way EW",p:"/trafficcams/images/5_NE_Northgate_EW.jpg",v:1,y:[47.7086,-122.3245]},
+  {l:"Alaskan Way & Marion St",p:"/trafficcams/images/Alaskan_Marion_NS.jpg",v:1,y:[47.6031,-122.3376]},
+  {l:"University Way NE & NE 43rd St SEC",p:"/trafficcams/images/University_NE_43_SEC.jpg",v:1,y:[47.6598,-122.3132]},
+  {l:"Alaskan Way S & S Atlantic St",p:"/trafficcams/images/Alaskan_S_Atlantic.jpg",v:1,y:[47.5903,-122.3374]},
+  {l:"Terry Ave N & Mercer St",p:"/trafficcams/images/Terry_N_Mercer_EW.jpg",v:1,y:[47.6247,-122.3371]},
+  {l:"4th Ave & Virginia St",p:"/trafficcams/images/4_Virginia.jpg",v:1,y:[47.6131,-122.34]},
+  {l:"12th Ave NE & NE 50th St",p:"/trafficcams/images/12_NE_50.jpg",v:1,y:[47.6649,-122.3152]},
+  {l:"Aurora Ave N & N 105th St EW",p:"/trafficcams/images/Aurora_N_105_EW.jpg",v:1,y:[47.7051,-122.3447]},
+  {l:"5th Ave & Spring St",p:"/trafficcams/images/5_Spring_EW.jpg",v:1,y:[47.6073,-122.3325]},
+  {l:"Fairview Ave N & Mercer St EW",p:"/trafficcams/images/Fairview_Mercer_5.jpg",v:1,y:[47.6248,-122.3344]},
+  {l:"4th Ave S & Spokane Viaduct",p:"/trafficcams/images/4_S_Spokane_EW.jpg",v:1,y:[47.5716,-122.3291]},
+  {l:"Aurora Ave N & N Winona St",p:"/trafficcams/images/Aurora_N_Winona_NS.jpg",v:1,y:[47.6828,-122.3445]},
+  {l:"1st Ave S & S Hudson St",p:"/trafficcams/images/1_S_Hudson_NS.jpg",v:1,y:[47.5574,-122.3342]},
+  {l:"California Ave SW & SW Hanford St",p:"/trafficcams/images/California_SW_Hanford_NS.jpg",v:1,y:[47.5756,-122.3868]},
+  {l:"3rd Ave & Wall St",p:"/trafficcams/images/3_Wall_NS.jpg",v:1,y:[47.616,-122.347]},
+  {l:"Taylor Ave & Mercer St",p:"/trafficcams/images/Taylor_N_Mercer_EW.jpg",v:1,y:[47.6246,-122.3463]},
+  {l:"1st Ave S & S Lander St",p:"/trafficcams/images/1_S_Lander_NS.jpg",v:1,y:[47.5798,-122.3342]},
+  {l:"3rd Ave & Columbia St",p:"/trafficcams/images/3_Columbia_EW.jpg",v:1,y:[47.6042,-122.3327]},
+  {l:"Greenwood Ave N & N 105th St",p:"/trafficcams/images/Greenwood_N_105_NS.jpg",v:1,y:[47.7051,-122.3555]},
+  {l:"4th Ave S & S Atlantic St",p:"/trafficcams/images/4_S_Atlantic_EW.jpg",v:1,y:[47.5903,-122.3291]},
+  {l:"Aurora Ave N & N 145th St EW",p:"/trafficcams/images/Aurora_N_145_1.jpg",v:1,y:[47.7341,-122.345]},
+  {l:"Westlake Ave & Denny Way EW",p:"/trafficcams/images/Westlake_Denny_EW.jpg",v:1,y:[47.6185,-122.3384]},
+  {l:"Brooklyn Ave NE & NE 45th St",p:"/trafficcams/images/Brooklyn_NE_45_NEC.jpg",v:1,y:[47.6613,-122.3142]},
+  {l:"4th Ave & Battery St",p:"/trafficcams/images/4_Battery_EW.jpg",v:1,y:[47.6161,-122.3451]},
+  {l:"1st Ave & Yesler Way",p:"/trafficcams/images/1_Yesler_EW.jpg",v:1,y:[47.6017,-122.3342]},
+  {l:"3rd Ave & Spring St",p:"/trafficcams/images/3_Spring_EW.jpg",v:1,y:[47.6063,-122.3347]},
+  {l:"Broadway & E Pike St NS",p:"/trafficcams/images/Broadway_E_Pike_NS.jpg",v:1,y:[47.6138,-122.3208]},
+  {l:"Lake City Way & NE 125th St 2",p:"/trafficcams/images/LCW_NE_125_2.jpg",v:1,y:[47.7191,-122.2953]},
+  {l:"Aurora Ave N & N 90th St",p:"/trafficcams/images/Aurora_N_90_NS.jpg",v:1,y:[47.6942,-122.3446]},
+  {l:"5th Ave & Olive Way",p:"/trafficcams/images/5_Olive.jpg",v:1,y:[47.6127,-122.3374]}
+];
+const pickCameras = (n) => CAMERAS.slice(0, n).map((c) => ({
+  label: c.l, img: PROXY + encodeURIComponent(c.p) + '&w=480', live: Boolean(c.v), lat: c.y[0], lng: c.y[1],
+}));
+// The cameras are in Seattle, so the clocks are Pacific regardless of where the
+// page is opened, and the zone label is derived rather than hard-coded to PDT.
+const PACIFIC = 'America/Los_Angeles';
+const clockAt = (minutesAgo) => new Date(Date.now() - minutesAgo * 60000)
+  .toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: PACIFIC });
+const zoneLabel = () => new Intl.DateTimeFormat('en-US', { timeZone: PACIFIC, timeZoneName: 'short' })
+  .formatToParts(new Date()).find((part) => part.type === 'timeZoneName').value;
+
+document.getElementById('adv-time').textContent = 'as of ' + clockAt(2);
+const cams = pickCameras(12);
+document.getElementById('grid').innerHTML = cams.map((c, i) => `
+  <article class="plate"><figure>
+    <div class="frame"><span class="idx">${String(i + 1).padStart(2, '0')}</span><img src="${c.img}" alt=""></div>
+    <figcaption>
+      <h2>${c.label}</h2>
+      <span class="state ${c.live ? 'live' : ''}"><i></i>${c.live ? 'Live' : 'Still'}</span>
+    </figcaption>
+    <span class="geo">${c.lat ? c.lat.toFixed(4) + ', ' + c.lng.toFixed(4) : '—'} · updated ${clockAt(i % 4)}</span>
+  </figure></article>`).join('');
+</script>
+</body>
+</html>
