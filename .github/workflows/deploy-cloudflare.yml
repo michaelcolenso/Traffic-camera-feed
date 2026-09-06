@@ -44,7 +44,10 @@ jobs:
           test -s worker-configuration.d.ts
           grep -q 'HISTORY_DB' worker-configuration.d.ts
           grep -q 'HISTORY_BUCKET' worker-configuration.d.ts
-          grep -q 'IMAGES' worker-configuration.d.ts
+          if grep -q 'IMAGES' worker-configuration.d.ts; then
+            echo "Cloudflare Images binding must not be present"
+            exit 1
+          fi
 
       - name: Verify Cloudflare credentials
         env:
@@ -109,8 +112,9 @@ jobs:
           test -n "$first_camera_id" || { echo "Camera payload did not include an id"; exit 1; }
           encoded_image_path="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$first_image_path")"
           encoded_camera_id="$(python -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$first_camera_id")"
-          transformed_status="$(curl --silent --show-error --max-time 10 -o /tmp/cams-transformed -w '%{http_code}' "https://cams.hoxel.dev/api/image?path=${encoded_image_path}&w=480")"
-          test "$transformed_status" = "200" || { echo "Expected transformed camera image to return 200, got ${transformed_status}"; exit 1; }
+          passthrough_status="$(curl --silent --show-error --max-time 10 -D /tmp/cams-image-headers -o /tmp/cams-passthrough -w '%{http_code}' "https://cams.hoxel.dev/api/image?path=${encoded_image_path}&w=480")"
+          test "$passthrough_status" = "200" || { echo "Expected raw camera image passthrough to return 200, got ${passthrough_status}"; exit 1; }
+          grep -qi '^x-image-processing: passthrough' /tmp/cams-image-headers || { echo "Camera image route did not confirm passthrough mode"; cat /tmp/cams-image-headers; exit 1; }
 
           timeline_ok=0
           for attempt in {1..12}; do
@@ -125,7 +129,7 @@ jobs:
           done
           test "$timeline_ok" -eq 1 || { echo "History timeline did not become healthy"; cat /tmp/cams-timeline || true; exit 1; }
 
-          echo "Core production smoke test passed: app, canonical cameras, images, D1/R2 history, Pulse, and timeline endpoints are healthy"
+          echo "Core production smoke test passed: app, canonical cameras, raw image passthrough, D1/R2 history, Pulse, and timeline endpoints are healthy"
 
           # Live HLS is an external dependency. Probe several current streams for visibility,
           # but do not fail a healthy deployment when Seattle's streaming origin is unavailable.
