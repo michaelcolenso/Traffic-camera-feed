@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "hoxel-traffic-camera-feed",
-  "main": "./prototype/vanilla/worker.ts",
+  "main": "./prototype/vanilla/no-image-transform-worker.ts",
   "compatibility_date": "2026-08-15",
   "compatibility_flags": [
     "nodejs_compat"
@@ -21,9 +21,6 @@
       "custom_domain": true
     }
   ],
-  "images": {
-    "binding": "IMAGES"
-  },
   "assets": {
     "directory": "./prototype/vanilla/public",
     "binding": "ASSETS",
