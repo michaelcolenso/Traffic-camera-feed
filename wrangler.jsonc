@@ -6,6 +6,7 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "workers_dev": false,
   "triggers": {
     "crons": [
       "* * * * *"
@@ -15,12 +16,6 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
-  "routes": [
-    {
-      "pattern": "cams.hoxel.dev",
-      "custom_domain": true
-    }
-  ],
   "assets": {
     "directory": "./prototype/vanilla/public",
     "binding": "ASSETS",
