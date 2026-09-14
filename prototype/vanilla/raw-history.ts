@@ -72,7 +72,14 @@ async function digestHex(bytes: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('');
 }
 
-async function fetchRawFrame(camera: RawHistoryCamera): Promise<{ bytes: ArrayBuffer; contentType: string }> {
+type FrameOk = { skipped: false; bytes: ArrayBuffer; contentType: string };
+type FrameSkip = { skipped: true; reason: string };
+
+function mediaType(contentType: string): string {
+  return contentType.toLowerCase().split(';')[0].trim();
+}
+
+async function fetchRawFrame(camera: RawHistoryCamera): Promise<FrameOk | FrameSkip> {
   if (!camera.imagePath.startsWith(CAMERA_PREFIX) || camera.imagePath.includes('..')) throw new Error('invalid camera path');
   const upstream = new URL(camera.imagePath, `https://${CAMERA_HOST}`);
   const response = await fetch(upstream, {
@@ -85,14 +92,18 @@ async function fetchRawFrame(camera: RawHistoryCamera): Promise<{ bytes: ArrayBu
       cacheTtl: 0,
     },
   } as RequestInit);
-  if (!response.ok) throw new Error(`snapshot ${response.status}`);
+  if (!response.ok) return { skipped: true, reason: `snapshot ${response.status}` };
   const contentType = response.headers.get('Content-Type') || 'application/octet-stream';
-  if (!contentType.toLowerCase().startsWith('image/')) throw new Error(`unexpected snapshot content type ${contentType}`);
-  return { bytes: await response.arrayBuffer(), contentType };
+  if (!mediaType(contentType).startsWith('image/')) {
+    return { skipped: true, reason: `non-image ${mediaType(contentType)}` };
+  }
+  return { skipped: false, bytes: await response.arrayBuffer(), contentType };
 }
 
-async function captureOne(env: ReadyBindings, camera: RawHistoryCamera, capturedAt: number): Promise<'stored' | 'duplicate'> {
-  const { bytes, contentType } = await fetchRawFrame(camera);
+async function captureOne(env: ReadyBindings, camera: RawHistoryCamera, capturedAt: number): Promise<'stored' | 'duplicate' | 'skipped'> {
+  const frame = await fetchRawFrame(camera);
+  if (frame.skipped) return 'skipped';
+  const { bytes, contentType } = frame;
   const sha256 = await digestHex(bytes);
   const latest = await env.HISTORY_DB.prepare(
     `SELECT r2_key, sha256, visual_fingerprint, mean_luma, visual_contrast
@@ -167,18 +178,20 @@ export async function captureRawHistory(env: RawHistoryBindings, cameras: RawHis
   const selected = cameras.filter((camera) => cameraBucket(camera.id) === bucket);
   let stored = 0;
   let duplicate = 0;
+  let skipped = 0;
   let failed = 0;
 
   await mapLimit(selected, CAPTURE_CONCURRENCY, async (camera) => {
     try {
       const result = await captureOne(env, camera, scheduledAt);
       if (result === 'stored') stored += 1;
-      else duplicate += 1;
+      else if (result === 'duplicate') duplicate += 1;
+      else skipped += 1;
     } catch (error) {
       failed += 1;
       console.error(JSON.stringify({ event: 'raw_history_capture_error', camera: camera.id, message: error instanceof Error ? error.message : String(error) }));
     }
   });
 
-  console.log(JSON.stringify({ event: 'raw_history_capture_complete', bucket, selected: selected.length, stored, duplicate, failed }));
+  console.log(JSON.stringify({ event: 'raw_history_capture_complete', bucket, selected: selected.length, stored, duplicate, skipped, failed }));
 }

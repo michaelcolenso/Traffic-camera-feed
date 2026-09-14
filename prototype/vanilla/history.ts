@@ -306,29 +306,55 @@ export async function captureHistory(env: HistoryBindings, cameras: HistoryCamer
   console.log(JSON.stringify({ event: 'history_capture_complete', bucket, selected: selected.length, stored, duplicate, failed }));
 }
 
+const D1_MAX_BOUND_PARAMS = 50;
+const PURGE_SELECT_LIMIT = 50;
+const PURGE_MAX_BATCHES = 40;
+const PURGE_TIME_BUDGET_MS = 10_000;
+
+async function deleteSnapshotRows(db: HistoryD1Database, ids: number[]): Promise<void> {
+  for (let i = 0; i < ids.length; i += D1_MAX_BOUND_PARAMS) {
+    const chunk = ids.slice(i, i + D1_MAX_BOUND_PARAMS);
+    const placeholders = chunk.map(() => '?').join(',');
+    await db.prepare(`DELETE FROM camera_snapshots WHERE id IN (${placeholders})`).bind(...chunk).run();
+  }
+}
+
 export async function purgeHistory(env: HistoryBindings, now = Date.now()): Promise<void> {
   if (!hasBindings(env)) return;
   const cutoff = now - RETENTION_MS;
-  const stale = await env.HISTORY_DB.prepare(
-    'SELECT id, r2_key FROM camera_snapshots WHERE captured_at < ? ORDER BY captured_at ASC LIMIT 200',
-  ).bind(cutoff).all<{ id: number; r2_key: string }>();
-  const rows = stale.results ?? [];
-  if (!rows.length) return;
+  const started = Date.now();
+  let rowsPurged = 0;
+  let objectsDeleted = 0;
+  let batches = 0;
 
-  const keys = [...new Set(rows.map((row) => row.r2_key))];
-  const referenced = new Set<string>();
-  for (const key of keys) {
-    const stillUsed = await env.HISTORY_DB.prepare(
-      'SELECT 1 AS found FROM camera_snapshots WHERE r2_key = ? AND captured_at >= ? LIMIT 1',
-    ).bind(key, cutoff).first<{ found: number }>();
-    if (stillUsed) referenced.add(key);
+  while (batches < PURGE_MAX_BATCHES && Date.now() - started < PURGE_TIME_BUDGET_MS) {
+    const stale = await env.HISTORY_DB.prepare(
+      `SELECT id, r2_key FROM camera_snapshots WHERE captured_at < ? ORDER BY captured_at ASC LIMIT ${PURGE_SELECT_LIMIT}`,
+    ).bind(cutoff).all<{ id: number; r2_key: string }>();
+    const rows = stale.results ?? [];
+    if (!rows.length) break;
+
+    const keys = [...new Set(rows.map((row) => row.r2_key))];
+    const referenced = new Set<string>();
+    for (const key of keys) {
+      const stillUsed = await env.HISTORY_DB.prepare(
+        'SELECT 1 AS found FROM camera_snapshots WHERE r2_key = ? AND captured_at >= ? LIMIT 1',
+      ).bind(key, cutoff).first<{ found: number }>();
+      if (stillUsed) referenced.add(key);
+    }
+    const deletable = keys.filter((key) => !referenced.has(key));
+    if (deletable.length) await env.HISTORY_BUCKET.delete(deletable);
+    await deleteSnapshotRows(env.HISTORY_DB, rows.map((row) => row.id));
+
+    rowsPurged += rows.length;
+    objectsDeleted += deletable.length;
+    batches += 1;
+    if (rows.length < PURGE_SELECT_LIMIT) break;
   }
-  const deletable = keys.filter((key) => !referenced.has(key));
-  if (deletable.length) await env.HISTORY_BUCKET.delete(deletable);
-  const ids = rows.map((row) => row.id);
-  const placeholders = ids.map(() => '?').join(',');
-  await env.HISTORY_DB.prepare(`DELETE FROM camera_snapshots WHERE id IN (${placeholders})`).bind(...ids).run();
-  console.log(JSON.stringify({ event: 'history_purge', rows: rows.length, objects: deletable.length }));
+
+  if (rowsPurged || batches) {
+    console.log(JSON.stringify({ event: 'history_purge', rows: rowsPurged, objects: objectsDeleted, batches }));
+  }
 }
 
 export async function handleHistoryRequest(request: Request, url: URL, env: HistoryBindings): Promise<Response | null> {
