@@ -102,7 +102,7 @@ async function fetchRawFrame(camera: RawHistoryCamera): Promise<FrameOk | FrameS
 
 async function captureOne(env: ReadyBindings, camera: RawHistoryCamera, capturedAt: number): Promise<'stored' | 'duplicate' | 'skipped'> {
   const frame = await fetchRawFrame(camera);
-  if (frame.skipped) return 'skipped';
+  if (frame.skipped === true) return 'skipped';
   const { bytes, contentType } = frame;
   const sha256 = await digestHex(bytes);
   const latest = await env.HISTORY_DB.prepare(
